@@ -1,0 +1,1 @@
+#Defines the image that is launched per wm_engine instance
