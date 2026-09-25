@@ -1,2 +1,2 @@
-#Defines the packages needed in the image. Sqlite is already included in the python oficial image
+# SQLite is provided by the Python image.
 kafka-python
