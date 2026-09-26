@@ -2,8 +2,11 @@ FROM gcc:14
 
 WORKDIR /usr/src/water_management_app/watering_station/monitor
 
+RUN apt-get update && apt-get install -y --no-install-recommends cmake \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY . .
 
-RUN g++ -std=c++23 -Wall -Wextra -pthread main.cpp -o WM_WS_M
+RUN cmake -B build -S . && cmake --build build/
 
-CMD ["./WM_WS_M"]
+CMD ["./build/WM_WS_M"]
