@@ -1,2 +1,2 @@
 # SQLite is provided by the Python image.
-kafka-python
+confluent-kafka
