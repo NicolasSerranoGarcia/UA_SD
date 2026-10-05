@@ -100,3 +100,4 @@ NAP#<protocol-version>#<ack-code>#4#<error-code>#FIN
 | `0` | Syntax error | The message could not be parsed. |
 | `1` | Station ID already exists | The station is already registered in the database. |
 | `2` | Unknown station requested activation | The given station is not registered but has requested activation |
+| `3` | Unknown NAP-PC | The NAP Protocol Code is a not known type |
