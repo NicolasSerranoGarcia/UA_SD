@@ -1,3 +1,5 @@
+#pragma once
+
 #include "../valve/valve.hpp"
 #include <random>
 

@@ -6,6 +6,7 @@
 
 namespace internal {
 
+//TODO: remove requestedFlux_ and leave flux_
 class Valve {
 public:
     enum class ErrorType {
