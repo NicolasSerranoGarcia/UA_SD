@@ -2,13 +2,13 @@ cmake_minimum_required(VERSION 3.16)
 
 project(watering_station_monitor)
 
-add_executable(WM_WS_M main.cpp)
+add_executable(WM_WS_M src/WM_WS_M.cpp)
 
 target_compile_features(WM_WS_M PRIVATE cxx_std_23)
 
 #Boost.program_options dependency for command line parsing
 find_package(Boost REQUIRED COMPONENTS program_options)
-target_link_libraries(WM_WS_E PRIVATE Boost::program_options)
+target_link_libraries(WM_WS_M PRIVATE Boost::program_options)
 
 #ninttp dependency (developed by me)
 include(FetchContent)
