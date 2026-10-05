@@ -7,3 +7,5 @@
 ### *How can I allow others to connect from their local PCs to my central instance deployed on Railway?*
 
 ### *What is the difference between generating a domain and generating a TCP Proxy in Railway?*
+
+### *How can I store and read information using SQLite and Python?*
