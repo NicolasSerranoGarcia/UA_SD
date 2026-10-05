@@ -5,7 +5,7 @@ project(watering_station_engine)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(RDKAFKA REQUIRED IMPORTED_TARGET rdkafka++)
 
-add_executable(WM_WS_E src/main.cpp)
+add_executable(WM_WS_E src/WM_WS_E.cpp)
 target_include_directories(WM_WS_E PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include/engine")
 
 #librdkafka++ dependency
