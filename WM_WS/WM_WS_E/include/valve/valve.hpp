@@ -6,7 +6,6 @@
 
 namespace internal {
 
-//TODO: remove requestedFlux_ and leave flux_
 class Valve {
 public:
     enum class ErrorType {
@@ -21,7 +20,7 @@ public:
     static constexpr units::liters_min maxFlux = 90;
 
     explicit Valve(units::liters_min startupFlux = 0)
-        : flux_(startupFlux), requestedFlux_(startupFlux) {
+        : flux_(startupFlux) {
         if (!internal::validFlow(startupFlux, maxFlux)) {
             throw std::invalid_argument("Valve startup flow must be finite and within [0, 90] L/min");
         }
@@ -32,30 +31,27 @@ public:
     void openFully() noexcept { setFlow(maxFlux); }
 
     [[nodiscard]] std::expected<void, Error> openBy(units::liters_min amount) noexcept {
-        if (!internal::validFlow(amount, maxFlux) || amount > maxFlux - requestedFlux_) {
+        if (!internal::validFlow(amount, maxFlux) || amount > maxFlux - flux_) {
             return std::unexpected(Error{ErrorType::InvalidFlow});
         }
-        setFlow(requestedFlux_ + amount);
+        setFlow(flux_ + amount);
         return {};
     }
 
     [[nodiscard]] std::expected<void, Error> closeBy(units::liters_min amount) noexcept {
-        if (!internal::validFlow(amount, maxFlux) || amount > requestedFlux_) {
+        if (!internal::validFlow(amount, maxFlux) || amount > flux_) {
             return std::unexpected(Error{ErrorType::InvalidFlow});
         }
-        setFlow(requestedFlux_ - amount);
+        setFlow(flux_ - amount);
         return {};
     }
 
-    [[nodiscard]] units::liters_min actualFlow() const noexcept { return flux_; }
-
 private:
     void setFlow(units::liters_min target) noexcept {
-        flux_ = requestedFlux_ = target;
+        flux_ = target;
     }
 
     units::liters_min flux_;
-    units::liters_min requestedFlux_;
 
     friend class FlowMeter;
 };

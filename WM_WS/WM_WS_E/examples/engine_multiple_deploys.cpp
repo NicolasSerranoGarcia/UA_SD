@@ -23,7 +23,7 @@ int main(){
         std::osyncstream out{std::cout};
         while(true){
             std::this_thread::sleep_for(10ms);
-            out << "engine: " << engine.remainingTimeToShutdown() << "\nengine1: " << engine1.remainingTimeToShutdown() << std::endl;
+            out << "engine: " << engine.timeToShutdown() << "\nengine1: " << engine1.timeToShutdown() << std::endl;
             out.emit();
         }
     });
@@ -32,7 +32,7 @@ int main(){
         std::osyncstream out{std::cout};
         while(true){
             std::this_thread::sleep_for(10ms);
-            out << "engine flow: " << engine.measureFlow().currentFlux << "\nengine1 flow: " << engine1.measureFlow().currentFlux << std::endl;
+            out << "engine flow: " << engine.measureFlow() << "\nengine1 flow: " << engine1.measureFlow() << std::endl;
             out.emit();
         }
     });

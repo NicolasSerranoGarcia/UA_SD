@@ -6,16 +6,10 @@
 
 namespace internal {
 
-struct measureResult{
-    units::liters_min currentFlux;
-    units::liters_min expectedFlux;
-};
-
 class FlowMeter{
     public:
-        static measureResult measure(const Valve& valve) noexcept{
-            return measureResult{ .currentFlux = valve.flux_, 
-                                    .expectedFlux = valve.requestedFlux_};
+        static units::liters_min measure(const Valve& valve) noexcept{
+            return valve.flux_;
         };
 };
 

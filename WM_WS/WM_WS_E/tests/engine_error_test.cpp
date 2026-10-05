@@ -24,11 +24,10 @@ int main() {
     assert(!repeated.error().invalidFlow);
 
     assert(engine.stop());
-    assert(engine.measure().currentFlux == 0);
+    assert(engine.measureFlow() == 0);
     assert(engine.start()); // Normal stop does not block future irrigation.
     engine.injectFault();
-    assert(engine.measure().currentFlux == 0);
-    assert(engine.measure().expectedFlux == 0);
+    assert(engine.measureFlow() == 0);
     auto health = engine.healthCheck();
     assert(!health && health.error().type == Engine::ErrorType::Fault);
     auto faultedStart = engine.start();
@@ -37,11 +36,11 @@ int main() {
     assert(!engine.healthCheck()); // Stopping does not repair a fault.
     engine.repair();
     assert(engine.healthCheck());
-    assert(engine.measure().currentFlux == 0);
+    assert(engine.measureFlow() == 0);
     assert(engine.start());
 
     assert(engine.block(0));
-    assert(engine.measure().currentFlux == 0);
+    assert(engine.measureFlow() == 0);
     auto blockedStart = engine.start();
     assert(!blockedStart && blockedStart.error().type == Engine::ErrorType::BlockedByCentral);
     engine.injectFault();
@@ -54,7 +53,7 @@ int main() {
     blockedStart = engine.start();
     assert(!blockedStart && blockedStart.error().type == Engine::ErrorType::BlockedByCentral);
     assert(engine.unblock(0));
-    assert(engine.measure().currentFlux == 0); // Unblocking does not start irrigation.
+    assert(engine.measureFlow() == 0); // Unblocking does not start irrigation.
     assert(engine.start());
     assert(engine.stop());
     auto stopped = engine.stop();

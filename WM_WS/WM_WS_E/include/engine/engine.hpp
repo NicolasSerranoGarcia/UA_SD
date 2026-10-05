@@ -91,7 +91,7 @@ public:
         }
 
         //should be 0 if there is no fault and the valve is closed
-        assert(internal::FlowMeter::measure(valve).currentFlux == 0);
+        assert(internal::FlowMeter::measure(valve) == 0);
 
         auto res = valve.openBy(startFlux);
         //on release assert is deleted so res will get a warning on unused variable
@@ -104,7 +104,7 @@ public:
         return {};
     }
 
-    std::chrono::seconds remainingTimeToShutdown(){
+    std::chrono::seconds timeToShutdown(){
         const auto time = std::chrono::duration_cast<std::chrono::seconds>(deadline - std::chrono::steady_clock::now());
         return time < 0s ? 0s : time;
     }
@@ -146,7 +146,7 @@ public:
         return state != State::Fault;
     }
 
-    [[nodiscard]] internal::measureResult measureFlow() const {
+    [[nodiscard]] internal::units::liters_min measureFlow() const {
         std::lock_guard lock(mutex_);
         return internal::FlowMeter::measure(valve);
     }
