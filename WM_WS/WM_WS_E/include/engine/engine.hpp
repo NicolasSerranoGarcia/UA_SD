@@ -104,7 +104,7 @@ public:
         return {};
     }
 
-    std::chrono::seconds timeToShutdown(){
+    std::chrono::seconds timeToShutdown() const{
         const auto time = std::chrono::duration_cast<std::chrono::seconds>(deadline - std::chrono::steady_clock::now());
         return time < 0s ? 0s : time;
     }

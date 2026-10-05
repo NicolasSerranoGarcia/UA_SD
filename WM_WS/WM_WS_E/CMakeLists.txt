@@ -7,6 +7,7 @@ pkg_check_modules(RDKAFKA REQUIRED IMPORTED_TARGET rdkafka++)
 
 add_executable(WM_WS_E src/WM_WS_E.cpp)
 target_include_directories(WM_WS_E PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include/engine")
+target_include_directories(WM_WS_E PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 #librdkafka++ dependency
 target_compile_features(WM_WS_E PRIVATE cxx_std_23)
@@ -22,7 +23,7 @@ include(FetchContent)
 FetchContent_Declare(
   ninttp
   GIT_REPOSITORY https://github.com/NicolasSerranoGarcia/ninttp.git
-  GIT_TAG 2fc067cd48cfc479d131c44a241b09c842eafdcf #latest 
+  GIT_TAG 61e798539367f640f304825012b9c45066532d90 # IPv4 validation and parsing
 )
 
 FetchContent_MakeAvailable(ninttp)
