@@ -109,6 +109,11 @@ public:
         return time < 0s ? 0s : time;
     }
 
+    bool isRunning() const{
+        std::lock_guard lock(mutex_);
+        return state == State::Idle;
+    }
+
     /// End irrigation without clearing a fault or changing Central's block.
     [[nodiscard]] std::expected<void, Error> stop() {
         std::lock_guard lock(mutex_);

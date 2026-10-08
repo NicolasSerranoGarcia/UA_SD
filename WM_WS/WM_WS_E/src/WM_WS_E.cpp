@@ -3,7 +3,7 @@
 #include <string>
 #include <ninttp/endpoints.hpp>
 #include <string_view>
-#include <coroutine>
+#include <memory>
 
 #include <ninttp/dns/dns.hpp>
 #include <ninttp/socket/socket.hpp>
@@ -22,26 +22,34 @@ namespace po = boost::program_options;
 
 using namespace ninttp;
 
-bool monitorHealth(const Engine& engine, StreamSocket<IPv4Endpoint>& hcpStreamer, std::chrono::seconds statusSendTimeout = 1s){
-    if(statusSendTimeout < 0s){
+bool monitorHealth(const Engine& engine, StreamSocket<IPv4Endpoint>& hcpStreamer){
+    static std::array<char, 512> buf;
+
+    auto got = hcpStreamer.receive(buf);
+
+    if(!got && got.error().category() != ninttp::SocketErrorCategory::Blocks){
+        std::cout << got.error().what() << std::endl;
+    }
+
+    if(!got && got.error().category() == ninttp::SocketErrorCategory::Blocks){
         return false;
     }
 
-    static auto nextHealthStatusSend = std::chrono::steady_clock::now() + statusSendTimeout;
-
-    if(std::chrono::steady_clock::now() < nextHealthStatusSend){
+    //this is all wrong. We may receive less than 2 bytes per reception. Still, I find it complicated to pipeline
+    //the data. 
+    if(got.value() < 2){
         return false;
     }
-    nextHealthStatusSend += statusSendTimeout;
 
-    //send 
-
-    if(engine.isHealthy()){
-        hcpStreamer.sendAll(HCPHelper::okMsg);
-    } else{
-        hcpStreamer.sendAll(HCPHelper::koMsg);
+    if(std::string{std::span{buf}.subspan(0, 2).data()} == std::string{"HC"}){
+        if(engine.isHealthy()){
+            hcpStreamer.sendAll({HCPHelper::okMsg});
+        } else{
+            hcpStreamer.sendAll({HCPHelper::koMsg});
+        }
     }
 
+    return true;
 }
 
 int main(int argc, char* argv[]) {
@@ -50,8 +58,7 @@ int main(int argc, char* argv[]) {
     desc.add_options()
     ("help", "produce help message")
     ("queue", po::value<std::string>(), "Set the Kafka broker endpoint address (usually hostname for TCP proxy)")
-    ("monitor-ip", po::value<std::string>(), "Monitor IPv4 address in dotted-decimal format (required)")
-    ("monitor-port", po::value<int>()->default_value(HCP_PORT), "Monitor HCP port (1-65535)");
+    ("hcp-port", po::value<int>()->default_value(HCP_PORT), "Local HCP listening port (1-65535)");
 
     po::variables_map vm;
     //stores in the variables map 'vm' as a table, the parsed options from the command line options
@@ -75,50 +82,53 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    const std::string_view monitorIp = vm.count("monitor-ip")
-        ? std::string_view{vm["monitor-ip"].as<std::string>()} : "";
-
-    if (monitorIp.empty()) {
-        std::cerr << "Error: missing monitor-ip argument\n" << desc << "\n";
+    const int hcpPort = vm["hcp-port"].as<int>();
+    if (hcpPort < 1 || hcpPort > 65535) {
+        std::cerr << "Error: hcp-port must be between 1 and 65535\n";
         return 1;
     }
-
-    const int monitorPort = vm["monitor-port"].as<int>();
-    if (monitorPort < 1 || monitorPort > 65535) {
-        std::cerr << "Error: monitor-port must be between 1 and 65535\n";
-        return 1;
-    }
-
-    const auto monitorEndpoint = IPv4Endpoint::fromString(
-        monitorIp, static_cast<std::uint16_t>(monitorPort));
-    if (!monitorEndpoint) {
-        std::cerr << "Error: monitor-ip must be a valid dotted-decimal IPv4 address\n";
-        return 1;
-    }
-
-    std::cout << "monitor: " << monitorIp << ':' << monitorEndpoint->portHostOrder()
-              << ", queue: " << queueEndpoint << std::endl;
 
     Engine engine;
+    engine.start();
 
-    StreamSocket<IPv4Endpoint> hcpStreamer(Protocol::Tcp);
+    ListenerSocket<IPv4Endpoint, StreamSocket<IPv4Endpoint>> listener(Protocol::Tcp, true);
 
-    if(auto connectRes = hcpStreamer.connect(monitorEndpoint.value()); !connectRes){
-        std::cerr << connectRes.error().what() << std::endl;
+    auto b = listener.bind(IPv4Endpoint{0, static_cast<std::uint16_t>(hcpPort)});
+
+    if (!b) {
+        std::cerr << b.error().what() << std::endl;
+        return 1;
+    }
+    if (auto result = listener.listen(1); !result) {
+        std::cerr << result.error().what() << std::endl;
+        return 1;
+    }
+
+    auto acceptRes = listener.accept();
+    if (!acceptRes) {
+        std::cerr << acceptRes.error().what() << std::endl;
+        return 1;
+    }
+
+    acceptRes.value().setNonblocking(true);
+
+    std::unique_ptr<RdKafka::Conf> config{RdKafka::Conf::create(RdKafka::Conf::CONF_GLOBAL)};
+
+    std::string err;
+    if (config->set("bootstrap.servers", queueEndpoint.data(), err) != RdKafka::Conf::CONF_OK) {
+        std::cerr << err << '\n';
+        return 1;
+    }
+
+    std::unique_ptr<RdKafka::Producer> producer{RdKafka::Producer::create(config.get(), err)};
+
+    if (!producer) {
+        std::cerr << err << '\n';
         return 1;
     }
 
     while(true){
-        auto engineSdTime = engine.timeToShutdown();
-        if(engineSdTime < 0s){
-            engine.stop();
-
-            //probably notify central via kafka
-        } else{
-            std::cout << "Remaining time to shutdown: " << engineSdTime << std::endl;
-        }
-
-        monitorHealth(engine, hcpStreamer);
+        //producer->produce("station-status", 1 );
+        monitorHealth(engine, acceptRes.value());
     }
-
 }
