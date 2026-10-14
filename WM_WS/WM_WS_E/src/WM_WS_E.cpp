@@ -120,6 +120,20 @@ int main(int argc, char* argv[]) {
 
     };
 
+    auto inputWorker = [](Engine& engine){
+        while(true){
+            char key;
+            std::cin >> key;
+            if(std::tolower(key) == 'f'){
+                engine.injectFault();
+            }
+
+            if(std::tolower(key) == 'r'){
+                engine.repair();
+            }
+        }
+    };
+
     auto createProducer = [](std::string_view queueEndpoint) -> std::unique_ptr<RdKafka::Producer> {
         std::unique_ptr<RdKafka::Conf> config{RdKafka::Conf::create(RdKafka::Conf::CONF_GLOBAL)};
 
@@ -138,7 +152,7 @@ int main(int argc, char* argv[]) {
         return producer;
     };
 
-    // Complete fallible Kafka setup before a worker can block in accept()/receive().
+    //returns a valid producer or not. We do not need to retry constructing a valid producer in the thread
     auto producer = createProducer(queueEndpoint);
     if (!producer) return 1;
 
@@ -146,6 +160,10 @@ int main(int argc, char* argv[]) {
     std::thread healthThread{[&] {
         healthSucceeded = healthStatusWorker(engine, hcpPort, timeout);
     }};
+
+    std::thread inputThread{inputWorker, std::ref(engine)};
+
+    inputThread.join();
     healthThread.join();
     return healthSucceeded ? 0 : 1;
 }
