@@ -77,53 +77,63 @@ int main(int argc, char* argv[]) {
 
         if (!b) {
             std::cerr << b.error().what() << std::endl;
-            return;
+            return false;
         }
-        //listener should handle more than one backlog to avoid losses of our connection request from monitor
         if (auto result = listener.listen(1); !result) {
             std::cerr << result.error().what() << std::endl;
-            return;
+            return false;
         }
 
         auto acceptRes = listener.accept();
         if (!acceptRes) {
             std::cerr << acceptRes.error().what() << std::endl;
-            return;
+            return false;
         }
 
         std::string wsId;
         if (!hcp::receiveId(acceptRes.value(), wsId)) {
             (void)acceptRes.value().sendAll(hcp::koMsg);
             std::cerr << "Error: missing or invalid HCP WS ID\n";
-            return;
+            return false;
         }
         engine.setWsId(wsId);
-        if (!acceptRes.value().sendAll(hcp::okMsg)) return;
+        if (auto result = acceptRes.value().sendAll(hcp::okMsg); !result) {
+            std::cerr << result.error().what() << std::endl;
+            return false;
+        }
         std::cout << "HCP station ID: " << engine.wsId() << std::endl;
         while (monitorHealth(engine, acceptRes.value())) {}
+        std::cerr << "Error: HCP session ended or received an invalid request\n";
+        return false;
 
     };
 
-    auto queueWorker = [](std::string_view queueEndpoint){
+    auto createProducer = [](std::string_view queueEndpoint) -> std::unique_ptr<RdKafka::Producer> {
         std::unique_ptr<RdKafka::Conf> config{RdKafka::Conf::create(RdKafka::Conf::CONF_GLOBAL)};
 
         std::string err;
         if (config->set("bootstrap.servers", queueEndpoint.data(), err) != RdKafka::Conf::CONF_OK) {
             std::cerr << err << '\n';
-            return;
+            return nullptr;
         }
 
         std::unique_ptr<RdKafka::Producer> producer{RdKafka::Producer::create(config.get(), err)};
 
         if (!producer) {
             std::cerr << err << '\n';
-            return;
+            return nullptr;
         }
+        return producer;
     };
 
-    std::thread healthThread{healthStatusWorker, std::ref(engine), hcpPort};
-    std::thread queueThread{queueWorker, queueEndpoint};
+    // Complete fallible Kafka setup before a worker can block in accept()/receive().
+    auto producer = createProducer(queueEndpoint);
+    if (!producer) return 1;
 
+    bool healthSucceeded = false;
+    std::thread healthThread{[&] {
+        healthSucceeded = healthStatusWorker(engine, hcpPort);
+    }};
     healthThread.join();
-    queueThread.join();
+    return healthSucceeded ? 0 : 1;
 }

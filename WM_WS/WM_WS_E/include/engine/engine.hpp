@@ -116,13 +116,15 @@ public:
     }
 
     std::chrono::seconds timeToShutdown() const{
+        std::lock_guard lock(mutex_);
+        if (state != State::Watering) return 0s;
         const auto time = std::chrono::duration_cast<std::chrono::seconds>(deadline - std::chrono::steady_clock::now());
         return time < 0s ? 0s : time;
     }
 
     bool isRunning() const{
         std::lock_guard lock(mutex_);
-        return state == State::Idle;
+        return state == State::Watering;
     }
 
     /// End irrigation without clearing a fault or changing Central's block.
@@ -151,6 +153,12 @@ public:
         return {};
     }
 
+    /// Simulate a fault and immediately stop irrigation.
+    void injectFault() {
+        std::lock_guard lock(mutex_);
+        injectFaultUnlocked();
+    }
+
     /// Resolving a fault leaves the station idle; a Central block still applies.
     void repair() {
         std::lock_guard lock(mutex_);
@@ -170,7 +178,7 @@ public:
 private:
 
     // Caller must hold mutex_.
-    void injectFault(){
+    void injectFaultUnlocked(){
         state = State::Fault;
         valve.close();
     }
@@ -213,7 +221,7 @@ private:
                     }
 
                     if (internal::LeakDetector::hasLeak(engine.valve)) {
-                        engine.injectFault();
+                        engine.injectFaultUnlocked();
                     }
                 }
             }
