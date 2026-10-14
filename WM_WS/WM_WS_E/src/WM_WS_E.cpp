@@ -23,11 +23,13 @@ namespace po = boost::program_options;
 
 using namespace ninttp;
 
-bool monitorHealth(const Engine& engine, StreamSocket<IPv4Endpoint>& socket) {
+bool monitorHealth(const Engine& engine, StreamSocket<IPv4Endpoint>& socket,
+                   std::chrono::milliseconds timeout) {
     std::array<char, 2> request;
-    if (!hcp::receiveExact(socket, request) ||
+    if (!hcp::receiveExact(socket, request, std::chrono::steady_clock::now() + timeout) ||
         std::string_view(request.data(), request.size()) != "HC") return false;
-    return socket.sendAll(engine.isHealthy() ? hcp::okMsg : hcp::koMsg).has_value();
+    return hcp::sendExact(socket, engine.isHealthy() ? hcp::okMsg : hcp::koMsg,
+                          std::chrono::steady_clock::now() + timeout).has_value();
 }
 
 int main(int argc, char* argv[]) {
@@ -36,7 +38,8 @@ int main(int argc, char* argv[]) {
     desc.add_options()
     ("help", "produce help message")
     ("queue", po::value<std::string>(), "Set the Kafka broker endpoint address (usually hostname for TCP proxy)")
-    ("hcp-port", po::value<int>()->default_value(HCP_PORT), "Local HCP listening port (1-65535)");
+    ("hcp-port", po::value<int>()->default_value(HCP_PORT), "Local HCP listening port (1-65535)")
+    ("hcp-timeout-ms", po::value<int>()->default_value(2000), "HCP receive/send deadline in milliseconds");
 
     po::variables_map vm;
     //stores in the variables map 'vm' as a table, the parsed options from the command line options
@@ -66,10 +69,18 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    const int timeoutMs = vm["hcp-timeout-ms"].as<int>();
+    if (timeoutMs <= 0) {
+        std::cerr << "Error: HCP timeout must be positive\n";
+        return 1;
+    }
+    const auto timeout = std::chrono::milliseconds{timeoutMs};
+
     Engine engine;
 
     auto healthStatusWorker =
-    [](Engine& engine, const int hcpPort){
+    [](Engine& engine, const int hcpPort, std::chrono::milliseconds timeout){
+        const auto deadline = [&] { return std::chrono::steady_clock::now() + timeout; };
 
         ListenerSocket<IPv4Endpoint, StreamSocket<IPv4Endpoint>> listener(Protocol::Tcp, true);
 
@@ -84,27 +95,28 @@ int main(int argc, char* argv[]) {
             return false;
         }
 
-        auto acceptRes = listener.accept();
-        if (!acceptRes) {
-            std::cerr << acceptRes.error().what() << std::endl;
-            return false;
-        }
+        while (true) {
+            auto acceptRes = listener.accept(false);
+            if (!acceptRes) {
+                std::cerr << acceptRes.error().what() << std::endl;
+                return false;
+            }
 
-        std::string wsId;
-        if (!hcp::receiveId(acceptRes.value(), wsId)) {
-            (void)acceptRes.value().sendAll(hcp::koMsg);
-            std::cerr << "Error: missing or invalid HCP WS ID\n";
-            return false;
+            std::string wsId;
+            if (!hcp::receiveId(acceptRes.value(), wsId, deadline())) {
+                (void)hcp::sendExact(acceptRes.value(), hcp::koMsg, deadline());
+                std::cerr << "Error: missing, timed out, or invalid HCP WS ID\n";
+                continue;
+            }
+            engine.setWsId(wsId);
+            if (auto result = hcp::sendExact(acceptRes.value(), hcp::okMsg, deadline()); !result) {
+                std::cerr << result.error().message() << std::endl;
+                continue;
+            }
+            std::cout << "HCP station ID: " << engine.wsId() << std::endl;
+            while (monitorHealth(engine, acceptRes.value(), timeout)) {}
+            std::cerr << "HCP session ended; waiting for Monitor to reconnect\n";
         }
-        engine.setWsId(wsId);
-        if (auto result = acceptRes.value().sendAll(hcp::okMsg); !result) {
-            std::cerr << result.error().what() << std::endl;
-            return false;
-        }
-        std::cout << "HCP station ID: " << engine.wsId() << std::endl;
-        while (monitorHealth(engine, acceptRes.value())) {}
-        std::cerr << "Error: HCP session ended or received an invalid request\n";
-        return false;
 
     };
 
@@ -132,7 +144,7 @@ int main(int argc, char* argv[]) {
 
     bool healthSucceeded = false;
     std::thread healthThread{[&] {
-        healthSucceeded = healthStatusWorker(engine, hcpPort);
+        healthSucceeded = healthStatusWorker(engine, hcpPort, timeout);
     }};
     healthThread.join();
     return healthSucceeded ? 0 : 1;

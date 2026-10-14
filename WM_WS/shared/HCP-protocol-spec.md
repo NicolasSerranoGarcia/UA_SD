@@ -40,8 +40,10 @@ must stop irrigation independently of the next health check.
 
 1. Monitor sends `HC` once per second while no previous request is outstanding.
 2. Engine replies immediately with `OK` or `KO`.
-3. Monitor waits at most three seconds for a complete response. This is the
-   default HCP response timeout; it may be configured independently of the interval.
+3. Monitor waits at most two seconds for a complete response. This is the
+   default response deadline (`--hcp-timeout-ms 2000`), also used separately for
+   connection establishment and each send/identification operation. Partial reads
+   do not restart it. Monitor uses nonblocking sockets and steady-clock deadlines.
 4. On `KO`, Monitor reports the fault to CENTRAL and continues checking.
 5. On timeout, connection failure, or invalid response, Monitor reports the
    health-check failure to CENTRAL, closes the connection, and retries connecting

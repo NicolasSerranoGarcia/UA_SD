@@ -21,7 +21,9 @@ int main(int argc, char* argv[]) {
     ("help", "produce help message")
     ("ws-id", po::value<std::string>(), "Watering station ID (required; 1-64 letters, digits, hyphens or underscores)")
     ("engine-ip", po::value<std::string>(), "Engine IPv4 address in dotted-decimal format (required)")
-    ("engine-port", po::value<int>()->default_value(HCP_PORT), "Engine HCP port (1-65535)");
+    ("engine-port", po::value<int>()->default_value(HCP_PORT), "Engine HCP port (1-65535)")
+    ("hcp-timeout-ms", po::value<int>()->default_value(2000), "Connect/send/response deadline in milliseconds")
+    ("hcp-retry-ms", po::value<int>()->default_value(1000), "Delay between connection attempts in milliseconds");
 
     po::variables_map vm;
     //stores in the variables map 'vm' as a table, the parsed options from the command line options
@@ -65,40 +67,61 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    StreamSocket<IPv4Endpoint> hcpStreamer(Protocol::Tcp);
-    if (auto result = hcpStreamer.connect(engineEndpoint.value()); !result) {
-        std::cerr << result.error().what() << std::endl;
+    const int timeoutMs = vm["hcp-timeout-ms"].as<int>();
+    const int retryMs = vm["hcp-retry-ms"].as<int>();
+    if (timeoutMs <= 0 || retryMs <= 0) {
+        std::cerr << "Error: HCP timeout and retry delay must be positive\n";
         return 1;
     }
+    const auto timeout = std::chrono::milliseconds{timeoutMs};
+    const auto deadline = [&] { return std::chrono::steady_clock::now() + timeout; };
+    std::optional<bool> lastHealthy;
+    // this is a placeholder that should report to central via NAP
+    const auto report = [&](bool healthy, std::string_view reason) {
+        if (!lastHealthy || *lastHealthy != healthy) {
+            std::cout << "CENTRAL hook: ws=" << wsId << " state="
+                      << (healthy ? "healthy" : "fault") << " reason=" << reason << std::endl;
+            lastHealthy = healthy;
+        }
+    };
+    const auto session = [&]() -> std::string {
+        //send ID. If any of the setup fails return the error (which will be notified to central on the outer loop
+        //and then retried here again).
+        StreamSocket<IPv4Endpoint> socket(Protocol::Tcp, false);
+        if (auto result = hcp::connectWithin(socket, *engineEndpoint, deadline()); !result)
+            return "connect: " + result.error().message();
+        if (auto result = hcp::sendExact(socket, "ID " + wsId + "\n", deadline()); !result)
+            return "identification send: " + result.error().message();
+        std::array<char, 2> response;
+        if (auto result = hcp::receiveExact(socket, response, deadline()); !result)
+            return "identification response: " + result.error().message();
+        if (std::string_view(response.data(), response.size()) != hcp::okMsg)
+            return "Engine rejected or returned an invalid WS-ID acknowledgement";
 
-    if (auto result = hcpStreamer.sendAll("ID " + wsId + "\n"); !result) {
-        std::cerr << result.error().what() << std::endl;
-        return 1;
-    }
-    std::array<char, 2> buf;
-    if (!hcp::receiveExact(hcpStreamer, buf) || std::string_view(buf.data(), buf.size()) != hcp::okMsg) {
-        std::cerr << "Error: Engine rejected or did not acknowledge the WS ID\n";
-        return 1;
-    }
+        //status checks every second
+        while (true) {
+            std::this_thread::sleep_for(1s);
+            if (auto result = hcp::sendExact(socket, "HC", deadline()); !result)
+                return "health request: " + result.error().message();
+            if (auto result = hcp::receiveExact(socket, response, deadline()); !result)
+                return "health response: " + result.error().message();
+            const std::string_view status(response.data(), response.size());
+            if (status != hcp::okMsg && status != hcp::koMsg)
+                return "invalid HCP health response";
+            std::cout << status << std::endl;
+            report(status == hcp::okMsg, status);
+        }
+    };
     while (true) {
-        std::this_thread::sleep_for(1s);
-
-        if (auto result = hcpStreamer.sendAll(std::string_view{"HC"}); !result) {
-            std::cerr << result.error().what() << std::endl;
-            return 1;
+        std::string failure;
+        try {
+            failure = session();
+        } catch (const ninttp::SocketError& error) {
+            failure = error.what();
         }
-
-        if (!hcp::receiveExact(hcpStreamer, buf)) {
-            std::cerr << "Error: incomplete HCP response or connection closed\n";
-            return 1;
-        }
-        const std::string_view status(buf.data(), buf.size());
-        if (status != hcp::okMsg && status != hcp::koMsg) {
-            std::cerr << "Error: invalid HCP health response\n";
-            return 1;
-        }
-        std::cout << status;
-        std::cout << std::endl;
+        // session's socket is destroyed before retrying: discard partial/late replies.
+        std::cerr << failure << std::endl;
+        report(false, failure);
+        std::this_thread::sleep_for(std::chrono::milliseconds{retryMs});
     }
-    return 0;
 }
