@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <string>
 #include <cstdint>
 #include <cassert>
 #include <expected>
@@ -48,6 +49,16 @@ public:
                      InvalidFlowDetails{requested, internal::Valve::maxFlux} };
         }
     };
+
+    void setWsId(const std::string& id) {
+        std::lock_guard lock(mutex_);
+        wsId_ = id;
+    }
+
+    [[nodiscard]] std::string wsId() const {
+        std::lock_guard lock(mutex_);
+        return wsId_;
+    }
 
     struct Config {
         seconds irrigationTimeoutLimit = 4000;
@@ -170,6 +181,7 @@ private:
 
     internal::Valve valve;
     Config config;
+    std::string wsId_;
 
     mutable std::mutex mutex_;
     std::chrono::steady_clock::time_point deadline{};

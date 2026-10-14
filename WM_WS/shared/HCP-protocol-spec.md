@@ -1,4 +1,4 @@
-# HCP Protocol Specification — Version 1.0
+# HCP Protocol Specification — Version 1.1
 
 HCP (Health Check Protocol) lets a station's Monitor check whether its Engine
 is healthy. It carries a boolean health result, not irrigation commands.
@@ -11,8 +11,19 @@ is healthy. It carries a boolean health result, not irrigation commands.
 
 ## Messages
 
-Every message is exactly **two ASCII bytes**, with no newline, separator, or
-null terminator.
+Before health checks, Monitor sends `ID <ws-id>\n` once per connection.
+The ID comes from its mandatory `--ws-id` option and contains 1–64 ASCII
+letters, digits, hyphens, or underscores. The newline terminates the frame;
+no null terminator is sent. Engine stores the ID and acknowledges with `OK`.
+An invalid ID receives `KO` and the connection is closed. An incomplete frame
+or disconnected peer cannot complete identification. `OK` here acknowledges
+identification only, not health. Monitor must wait for it before sending `HC`.
+Engine has no WS-ID command-line option; it obtains its identity from Monitor.
+
+Example: `WM_WS_M --ws-id station-7 --engine-ip 127.0.0.1`.
+
+After identification, every message is exactly **two ASCII bytes**, with no
+newline, separator, or null terminator.
 
 | Direction | Bytes | Meaning |
 | --- | --- | --- |
@@ -45,3 +56,10 @@ TCP is a byte stream: a send or receive call does not define a message boundary.
 Send all two bytes and accumulate received bytes until a full two-byte message
 is available, retaining any remaining bytes for the next message. A timeout
 covers the whole response, including partial reads.
+
+Both images require `WM_WS` as their Docker build context for the shared header:
+
+```sh
+docker build -f WM_WS/WM_WS_E/Dockerfile -t wm-ws-e WM_WS
+docker build -f WM_WS/WM_WS_M/Dockerfile -t wm-ws-m WM_WS
+```

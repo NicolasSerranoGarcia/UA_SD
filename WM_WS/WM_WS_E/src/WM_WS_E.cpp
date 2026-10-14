@@ -1,9 +1,11 @@
 #include <iostream>
+#include "../../shared/hcp.hpp"
 #include <cstdint>
 #include <string>
 #include <ninttp/endpoints.hpp>
 #include <string_view>
 #include <memory>
+#include <functional>
 
 #include <ninttp/dns/dns.hpp>
 #include <ninttp/socket/socket.hpp>
@@ -14,7 +16,6 @@
 
 #include "engine.hpp"
 
-#include "hcp_helper/hcp_helper.hpp"
 
 constexpr const int HCP_PORT = 8080;
 
@@ -22,34 +23,11 @@ namespace po = boost::program_options;
 
 using namespace ninttp;
 
-bool monitorHealth(const Engine& engine, StreamSocket<IPv4Endpoint>& hcpStreamer){
-    static std::array<char, 512> buf;
-
-    auto got = hcpStreamer.receive(buf);
-
-    if(!got && got.error().category() != ninttp::SocketErrorCategory::Blocks){
-        std::cout << got.error().what() << std::endl;
-    }
-
-    if(!got && got.error().category() == ninttp::SocketErrorCategory::Blocks){
-        return false;
-    }
-
-    //this is all wrong. We may receive less than 2 bytes per reception. Still, I find it complicated to pipeline
-    //the data. 
-    if(got.value() < 2){
-        return false;
-    }
-
-    if(std::string{std::span{buf}.subspan(0, 2).data()} == std::string{"HC"}){
-        if(engine.isHealthy()){
-            hcpStreamer.sendAll({HCPHelper::okMsg});
-        } else{
-            hcpStreamer.sendAll({HCPHelper::koMsg});
-        }
-    }
-
-    return true;
+bool monitorHealth(const Engine& engine, StreamSocket<IPv4Endpoint>& socket) {
+    std::array<char, 2> request;
+    if (!hcp::receiveExact(socket, request) ||
+        std::string_view(request.data(), request.size()) != "HC") return false;
+    return socket.sendAll(engine.isHealthy() ? hcp::okMsg : hcp::koMsg).has_value();
 }
 
 int main(int argc, char* argv[]) {
@@ -89,46 +67,63 @@ int main(int argc, char* argv[]) {
     }
 
     Engine engine;
-    engine.start();
 
-    ListenerSocket<IPv4Endpoint, StreamSocket<IPv4Endpoint>> listener(Protocol::Tcp, true);
+    auto healthStatusWorker =
+    [](Engine& engine, const int hcpPort){
 
-    auto b = listener.bind(IPv4Endpoint{0, static_cast<std::uint16_t>(hcpPort)});
+        ListenerSocket<IPv4Endpoint, StreamSocket<IPv4Endpoint>> listener(Protocol::Tcp, true);
 
-    if (!b) {
-        std::cerr << b.error().what() << std::endl;
-        return 1;
-    }
-    if (auto result = listener.listen(1); !result) {
-        std::cerr << result.error().what() << std::endl;
-        return 1;
-    }
+        auto b = listener.bind(IPv4Endpoint{0, static_cast<std::uint16_t>(hcpPort)});
 
-    auto acceptRes = listener.accept();
-    if (!acceptRes) {
-        std::cerr << acceptRes.error().what() << std::endl;
-        return 1;
-    }
+        if (!b) {
+            std::cerr << b.error().what() << std::endl;
+            return;
+        }
+        //listener should handle more than one backlog to avoid losses of our connection request from monitor
+        if (auto result = listener.listen(1); !result) {
+            std::cerr << result.error().what() << std::endl;
+            return;
+        }
 
-    acceptRes.value().setNonblocking(true);
+        auto acceptRes = listener.accept();
+        if (!acceptRes) {
+            std::cerr << acceptRes.error().what() << std::endl;
+            return;
+        }
 
-    std::unique_ptr<RdKafka::Conf> config{RdKafka::Conf::create(RdKafka::Conf::CONF_GLOBAL)};
+        std::string wsId;
+        if (!hcp::receiveId(acceptRes.value(), wsId)) {
+            (void)acceptRes.value().sendAll(hcp::koMsg);
+            std::cerr << "Error: missing or invalid HCP WS ID\n";
+            return;
+        }
+        engine.setWsId(wsId);
+        if (!acceptRes.value().sendAll(hcp::okMsg)) return;
+        std::cout << "HCP station ID: " << engine.wsId() << std::endl;
+        while (monitorHealth(engine, acceptRes.value())) {}
 
-    std::string err;
-    if (config->set("bootstrap.servers", queueEndpoint.data(), err) != RdKafka::Conf::CONF_OK) {
-        std::cerr << err << '\n';
-        return 1;
-    }
+    };
 
-    std::unique_ptr<RdKafka::Producer> producer{RdKafka::Producer::create(config.get(), err)};
+    auto queueWorker = [](std::string_view queueEndpoint){
+        std::unique_ptr<RdKafka::Conf> config{RdKafka::Conf::create(RdKafka::Conf::CONF_GLOBAL)};
 
-    if (!producer) {
-        std::cerr << err << '\n';
-        return 1;
-    }
+        std::string err;
+        if (config->set("bootstrap.servers", queueEndpoint.data(), err) != RdKafka::Conf::CONF_OK) {
+            std::cerr << err << '\n';
+            return;
+        }
 
-    while(true){
-        //producer->produce("station-status", 1 );
-        monitorHealth(engine, acceptRes.value());
-    }
+        std::unique_ptr<RdKafka::Producer> producer{RdKafka::Producer::create(config.get(), err)};
+
+        if (!producer) {
+            std::cerr << err << '\n';
+            return;
+        }
+    };
+
+    std::thread healthThread{healthStatusWorker, std::ref(engine), hcpPort};
+    std::thread queueThread{queueWorker, queueEndpoint};
+
+    healthThread.join();
+    queueThread.join();
 }

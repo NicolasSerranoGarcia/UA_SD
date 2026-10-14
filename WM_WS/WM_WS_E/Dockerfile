@@ -5,7 +5,9 @@ WORKDIR /usr/src/water_management_app/watering_station/engine
 RUN apt-get update && apt-get install -y --no-install-recommends librdkafka-dev cmake pkg-config libboost-program-options-dev libboost-url-dev\
     && rm -rf /var/lib/apt/lists/*
 
-COPY . .
+# Build with WM_WS as the context so the shared HCP header is available.
+COPY WM_WS_E/ .
+COPY shared/ ../shared/
 
 RUN cmake -B build -S . && cmake --build build/
 
