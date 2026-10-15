@@ -38,7 +38,21 @@ def manage_WS(client_socket: socket.socket, addr):
         match prot_code:
             
             case 0:
-                print("Registration")
+                
+                station_id = int(msg[start_index+4])
+                
+                if db.check_station(station_id=station_id):
+                    
+                    client_socket.send(f"NAP#1.0#{ack_code}#4#1#FIN".encode(FORMAT)) # The station already exists in the DB
+                    
+                else:
+                    
+                    station_location = str(msg[start_index+5])
+                    
+                    db.store_station(station_id=station_id, station_location=station_location) # The station is stored in the DB
+                    client_socket.send(f"NAP#1.0#{ack_code}#3#FIN".encode(FORMAT))
+                    
+                
             case 1:
                 print("Activation")
             case 2:

@@ -126,7 +126,32 @@ def read_stations():
         
         conn.close()
         
-def check_operator(operator_id: int) -> bool: # type: ignore
+        
+def check_station(station_id: int) -> bool:
+    
+    conn = get_db_connection()
+    
+    try:
+        
+        cursor = conn.cursor()
+        cursor.execute("""
+                       SELECT EXISTS(SELECT 1 FROM stations WHERE id = ?)
+                       """, (station_id,))
+        
+        return cursor.fetchone()[0]
+        
+    except Exception as e:
+        
+        print("DB ERROR: ", e)
+        return False
+        
+    finally:
+        
+        conn.close()    
+    
+    
+        
+def check_operator(operator_id: int) -> bool:
     
     conn = get_db_connection()
     
@@ -142,13 +167,17 @@ def check_operator(operator_id: int) -> bool: # type: ignore
     except Exception as e:
         
         print("DB ERROR: ", e)
+        return False
         
     finally:
         
         conn.close()
     
 def _erase_db():
+    """
+    THIS IS A PRIVATE FUNCTION THAT SHOULD NOT BE USED UNLESS YOU WANT TO DELETE ALL YOUR DB
     
+    """
     conn = get_db_connection()
 
     try:
