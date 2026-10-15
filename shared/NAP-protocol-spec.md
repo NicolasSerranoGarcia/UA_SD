@@ -41,7 +41,7 @@ The monitor sends a registration request to the central server so that the serve
 can register the station in its database.
 
 ```text
-NAP#<protocol-version>#0#<ack-code>#<station-id>#<location>#FIN
+NAP#<protocol-version>#<ack-code>#0#<station-id>#<location>#FIN
 ```
 
 | Field | Description |
