@@ -41,20 +41,32 @@ def manage_WS(client_socket: socket.socket, addr):
                 
                 station_id = int(msg[start_index+4])
                 
-                if db.check_station(station_id=station_id):
-                    
-                    client_socket.send(f"NAP#1.0#{ack_code}#4#1#FIN".encode(FORMAT)) # The station already exists in the DB
-                    
-                else:
+                if not db.check_station(station_id=station_id):
                     
                     station_location = str(msg[start_index+5])
                     
                     db.store_station(station_id=station_id, station_location=station_location) # The station is stored in the DB
                     client_socket.send(f"NAP#1.0#{ack_code}#3#FIN".encode(FORMAT))
                     
+                else:
+                    
+                    client_socket.send(f"NAP#1.0#{ack_code}#4#1#FIN".encode(FORMAT)) # The station already exists in the DB
+                    
                 
             case 1:
-                print("Activation")
+                
+                station_id = int(msg[start_index+4])
+                
+                if db.check_station(station_id=station_id):
+                    
+                    db.set_station_status(station_id=station_id, status="Available")
+                    client_socket.send(f"NAP#1.0#{ack_code}#3#FIN".encode(FORMAT))
+                    
+                else:
+                    
+                    client_socket.send(f"NAP#1.0#{ack_code}#4#2#FIN".encode(FORMAT))
+                    
+                    
             case 2:
                 print("Status")
             case 3:
