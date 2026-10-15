@@ -1,22 +1,23 @@
-"""Container smoke example; Central application logic is not implemented yet."""
-
 import sys
 import os
 import argparse
 import socket
 import threading
-import sqlite3
-from confluent_kafka import Consumer, Producer
+import modules.DBManagement as db
+from kafka import KafkaConsumer, KafkaProducer
 
 FORMAT = 'utf-8'
+HEADER = 50
+SEPARATOR = "#"
+
 
 def manage_WS(client_socket: socket.socket, addr):
     
-    msg = client_socket.recv(50).decode(FORMAT).split("#")
+    msg = client_socket.recv(HEADER).decode(FORMAT).split(SEPARATOR)
     
     while "FIN" not in msg:
         
-        msg += client_socket.recv(50).decode(FORMAT).split("#")
+        msg += client_socket.recv(HEADER).decode(FORMAT).split(SEPARATOR)
     
     end_index = msg.index("FIN")
     rest = msg[end_index+1:]
@@ -113,5 +114,7 @@ def main():
 
 
 if __name__ == "__main__":
+    
+    db.init_database()
     main()
 
