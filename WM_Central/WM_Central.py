@@ -70,8 +70,12 @@ def manage_WS(client_socket: socket.socket, addr):
             case 2:
                 print("Status")
             case 3:
+                
+                # TODO
                 print("ACK")
             case 4:
+                
+                # TODO 
                 print("NACK")
             case _:
 
@@ -128,6 +132,7 @@ def main():
             
     except KeyboardInterrupt:
         
+        db.stop_database()
         print("Interruption forced. Exiting the program...")
     
     except Exception as e:

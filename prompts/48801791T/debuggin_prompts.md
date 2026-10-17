@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . . 
 ```
-
+---
 ### *Could you tell me if my current code is correct, focusing on argument handling?*
 ```python
 import sys
@@ -50,3 +50,60 @@ if __name__ == "__main__":
     main()
 
 ```
+---
+### *Is my current writer_worker implemented correctly?*
+```python
+def _db_writer_worker():
+    
+    conn = get_db_connection()
+    try:
+        
+        while True:
+            
+            request = _db_queue.get()
+            
+            if request is None:
+                break
+            
+            op, data = request
+            try:
+                
+                cursor = conn.cursor()
+                if op == "INSERT_STATION":
+                    
+                    station_id, station_location, station_status = data
+                    cursor.execute( """
+                                    INSERT INTO stations (id, location, status) VALUES (?, ?, ?)
+                                    """, (station_id, station_location, station_status))    
+                    
+                elif op == "INSERT_OPERATOR":
+                    
+                    operator_id = data
+                    cursor.execute( """
+                                    INSERT INTO operators (id) VALUES (?)
+                                    """, (operator_id,))    
+                    
+                elif op == "SET_STATION_STATUS":
+                    
+                    station_id, status = data
+                    cursor.execute( """
+                                    UPDATE stations SET status = ? WHERE id = ?
+                                    """, (status, station_id))           
+                
+                conn.commit()
+            
+            except Exception as e:
+                
+                print("DB ERROR: ", e)
+                
+    
+    except Exception as e:
+    
+        print("DB ERROR: ", e)
+    
+    finally:
+        
+        conn.close()
+
+```
+---
