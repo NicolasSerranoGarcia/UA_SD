@@ -1,10 +1,10 @@
 """Container smoke example; operator application logic is not implemented yet."""
 
-from kafka import KafkaConsumer, KafkaProducer
+from confluent_kafka import Consumer, Producer
 
 
 def main():
-    print(f"Kafka client: {KafkaProducer.__name__}, {KafkaConsumer.__name__}")
+    print(f"Kafka client: {Producer.__name__}, {Consumer.__name__}")
 
 
 if __name__ == "__main__":
