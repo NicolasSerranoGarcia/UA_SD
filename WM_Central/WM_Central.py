@@ -4,7 +4,7 @@ import argparse
 import socket
 import threading
 import modules.DBManagement as db
-from kafka import KafkaConsumer, KafkaProducer
+from confluent_kafka import Consumer, Producer
 
 FORMAT = 'utf-8'
 HEADER = 50
