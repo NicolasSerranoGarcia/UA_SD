@@ -41,7 +41,7 @@ The monitor sends a registration request to the central server so that the serve
 can register the station in its database.
 
 ```text
-NAP#<protocol-version>#0#<ack-code>#<station-id>#<location>#FIN
+NAP#<protocol-version>#<ack-code>#0#<station-id>#<location>#FIN
 ```
 
 | Field | Description |
@@ -100,3 +100,4 @@ NAP#<protocol-version>#<ack-code>#4#<error-code>#FIN
 | `0` | Syntax error | The message could not be parsed. |
 | `1` | Station ID already exists | The station is already registered in the database. |
 | `2` | Unknown station requested activation | The given station is not registered but has requested activation |
+| `3` | Unknown NAP-PC | The NAP Protocol Code is a not known type |
