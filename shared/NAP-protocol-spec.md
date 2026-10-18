@@ -66,7 +66,15 @@ NAP#<protocol-version>#<ack-code>#1#<station-id>#<LRC>#FIN
 
 ### Status
 
----
+```text
+NAP#<protocol-version>#<ack-code>#2#<status>#<LRC>#FIN
+```
+
+| Field | Description |
+| --- | --- |
+| `<status>` | Status of the station. It can be: "OK" if the station is available or "KO" if there has been a leak.|
+
+<br>
 
 ## Responses
 
