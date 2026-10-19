@@ -85,10 +85,11 @@ If the request is fulfilled successfully, the server responds with the following
 message:
 
 ```text
-NAP#<protocol-version>#<ack-code>#3#<LRC>#FIN
+NAP#<protocol-version>#<ack-code>#3#<station_id>#<LRC>#FIN
 ```
 
 The `<ack-code>` matches the code in the corresponding request.
+The `<station_id>` is the station which the ack is directed to.
 
 <br>
 
@@ -98,8 +99,9 @@ If an error occurs, the server sends the client the following message with the
 appropriate [NACK error code](#nack-error-codes):
 
 ```text
-NAP#<protocol-version>#<ack-code>#4#<error-code>#<LRC>#FIN
+NAP#<protocol-version>#<ack-code>#4#<error-code>#<station_id>#<LRC>#FIN
 ```
+The `<station_id>` is the station which the nack is directed to.
 
 <br>
 
