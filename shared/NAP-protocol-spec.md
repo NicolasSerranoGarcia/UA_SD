@@ -7,7 +7,7 @@ This protocol is intended for use between Central and Monitor to authenticate wa
 ## General Message Format
 
 ```text
-NAP#<protocol-version>#<ack-code>#<NAP-PC>[#fields]#FIN
+NAP#<protocol-version>#<ack-code>#<NAP-PC>[#fields]#<LRC>#FIN
 ```
 
 | Component | Description |
@@ -17,6 +17,7 @@ NAP#<protocol-version>#<ack-code>#<NAP-PC>[#fields]#FIN
 | `<ack-code>` | Unique code shared by a request and its response. For example, a response to an activation request with `<ack-code>` equal to `4` must also use `4`. |
 | `<NAP-PC>` | Protocol code identifying the message type. |
 | `[#fields]` | Optional, message-specific fields. |
+|`<LRC>` | Longitudinal Redundancy Check. |
 | `FIN` | Message terminator. |
 
 ---
@@ -41,7 +42,7 @@ The monitor sends a registration request to the central server so that the serve
 can register the station in its database.
 
 ```text
-NAP#<protocol-version>#<ack-code>#0#<station-id>#<location>#FIN
+NAP#<protocol-version>#<ack-code>#0#<station-id>#<location>#<LRC>#FIN
 ```
 
 | Field | Description |
@@ -54,7 +55,7 @@ NAP#<protocol-version>#<ack-code>#0#<station-id>#<location>#FIN
 ### Activation
 
 ```text
-NAP#<protocol-version>#<ack-code>#1#<station-id>#FIN
+NAP#<protocol-version>#<ack-code>#1#<station-id>#<LRC>#FIN
 ```
 
 | Field | Description |
@@ -65,7 +66,15 @@ NAP#<protocol-version>#<ack-code>#1#<station-id>#FIN
 
 ### Status
 
----
+```text
+NAP#<protocol-version>#<ack-code>#2#<status>#<LRC>#FIN
+```
+
+| Field | Description |
+| --- | --- |
+| `<status>` | Status of the station. It can be: "OK" if the station is available or "KO" if there has been a leak.|
+
+<br>
 
 ## Responses
 
@@ -75,7 +84,7 @@ If the request is fulfilled successfully, the server responds with the following
 message:
 
 ```text
-NAP#<protocol-version>#<ack-code>#3#FIN
+NAP#<protocol-version>#<ack-code>#3#<LRC>#FIN
 ```
 
 The `<ack-code>` matches the code in the corresponding request.
@@ -88,7 +97,7 @@ If an error occurs, the server sends the client the following message with the
 appropriate [NACK error code](#nack-error-codes):
 
 ```text
-NAP#<protocol-version>#<ack-code>#4#<error-code>#FIN
+NAP#<protocol-version>#<ack-code>#4#<error-code>#<LRC>#FIN
 ```
 
 <br>
