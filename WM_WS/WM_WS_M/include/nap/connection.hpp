@@ -38,7 +38,7 @@ namespace nap {
                     case Type::Io: return socketErr ? socketErr->what() : "Socket I/O failed";
                     case Type::Closed: return "Connection closed before a complete response";
                     case Type::NoPendingRequest: return "No request is awaiting a response";
-                    case Type::InvalidResponse: return "Invalid NAP response or mismatched ACK code";
+                    case Type::InvalidResponse: return "Invalid NAP response or mismatched request number/station ID";
                     case Type::Checksum: return "Invalid NAP LRC";
                     case Type::Nack: return "NAP NACK: " + std::to_string(nackCode.value_or(0));
                     case Type::InvalidField: return "NAP fields must be nonempty and contain no #";
@@ -58,8 +58,12 @@ namespace nap {
             return {};
         }
 
-        std::expected<void, Error> sendStatus(bool statusOk) {
-            return sendRequest("2", statusOk ? "OK" : "KO");
+        std::expected<void, Error> sendStatus(std::string_view wsId, bool statusOk) {
+            if (!validField(wsId))
+                return std::unexpected{Error{Error::Type::InvalidField}};
+            std::string fields{wsId};
+            fields += statusOk ? "#OK" : "#KO";
+            return sendRequest("2", fields, wsId);
         }
 
         std::expected<void, Error> sendRegistration(std::string_view wsId,
@@ -69,13 +73,13 @@ namespace nap {
             std::string fields{wsId};
             fields += '#';
             fields += location;
-            return sendRequest("0", fields);
+            return sendRequest("0", fields, wsId);
         }
 
         std::expected<void, Error> sendActivation(std::string_view wsId) {
             if (!validField(wsId))
                 return std::unexpected{Error{Error::Type::InvalidField}};
-            return sendRequest("1", wsId);
+            return sendRequest("1", wsId, wsId);
         }
 
         // Returns the validated ACK frame, or an error (including the server's NACK code).
@@ -85,7 +89,7 @@ namespace nap {
                 return std::unexpected{Error{Error::Type::NoPendingRequest}};
 
             // Read through exactly one terminator without consuming the next TCP frame.
-            // ACK/NACK responses only contain a version, numeric codes, and an LRC.
+            // ACK/NACK responses include the request number and station ID.
             std::string response;
             constexpr std::size_t maxResponseSize = 256;
             const auto responseDeadline = deadline();
@@ -108,19 +112,23 @@ namespace nap {
                 fields.push_back(view.substr(start, end - start));
             fields.push_back(view.substr(start));
 
-            if ((fields.size() != 6 && fields.size() != 7) ||
+            if ((fields.size() != 7 && fields.size() != 8) ||
                 fields[0] != "NAP" || fields[1] != "1.0" || fields.back() != "FIN")
                 return std::unexpected{Error{Error::Type::InvalidResponse}};
 
             unsigned int ack = 0;
-            if (!parseNumber(fields[2], ack) || ack != expectedAck)
+            if (!parseNumber(fields[2], ack) || ack != expectedAck.code)
                 return std::unexpected{Error{Error::Type::InvalidResponse}};
 
-            const bool isAck = fields[3] == "3" && fields.size() == 6;
-            const bool isNack = fields[3] == "4" && fields.size() == 7;
+            const bool isAck = fields[3] == "3" && fields.size() == 7;
+            const bool isNack = fields[3] == "4" && fields.size() == 8;
             unsigned int nack = 0;
             if ((!isAck && !isNack) ||
                 (isNack && (!parseNumber(fields[4], nack) || nack > 3)))
+                return std::unexpected{Error{Error::Type::InvalidResponse}};
+
+            const auto stationId = fields[isAck ? 4 : 5];
+            if (stationId != expectedAck.stationId)
                 return std::unexpected{Error{Error::Type::InvalidResponse}};
 
             const auto lrc = fields[fields.size() - 2];
@@ -180,7 +188,8 @@ namespace nap {
             return body;
         }
 
-        std::expected<void, Error> sendRequest(std::string_view code, std::string_view fields) {
+        std::expected<void, Error> sendRequest(std::string_view code, std::string_view fields,
+                                               std::string_view stationId) {
             if (pendingAck_)
                 return std::unexpected{Error{Error::Type::PendingRequest}};
             std::string body = "NAP#1.0#" + std::to_string(nextAck_) + '#';
@@ -192,7 +201,7 @@ namespace nap {
                 (void)sock_.close(); // A partial send cannot safely be retried on this stream.
                 return std::unexpected{fromIoError(sent.error())};
             }
-            pendingAck_ = nextAck_++;
+            pendingAck_ = PendingRequest{nextAck_++, std::string{stationId}};
             return {};
         }
 
@@ -204,7 +213,11 @@ namespace nap {
 
         std::chrono::milliseconds timeout_;
         unsigned int nextAck_ = 0;
-        std::optional<unsigned int> pendingAck_;
+        struct PendingRequest {
+            unsigned int code;
+            std::string stationId;
+        };
+        std::optional<PendingRequest> pendingAck_;
         ninttp::StreamSocket<EndpointT> sock_;
     };
 }

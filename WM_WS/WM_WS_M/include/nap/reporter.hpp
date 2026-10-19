@@ -47,7 +47,7 @@ private:
     bool send(bool healthy, const std::string& reason) {
         Connection<ninttp::IPv4Endpoint> conn(timeout_);
         auto result = conn.open(endpoint_);
-        if (result) result = conn.sendStatus(healthy);
+        if (result) result = conn.sendStatus(wsId_, healthy);
         if (!result) {
             std::cerr << "Error: sending central status failed. Reason: "
                       << result.error().message() << '\n';
