@@ -8,3 +8,9 @@ py .\WM_Central\clienteprueba.py localhost 8080 NAP#<protocol-version>#<ack-code
 
 
 --- 
+
+### *Create a Python function to calculate the LRC of a message using cumulative XOR.*
+
+---
+
+### *Create two Python functions to help me send and process messages for my NAP protocol.*
