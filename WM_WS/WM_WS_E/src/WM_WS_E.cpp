@@ -120,7 +120,7 @@ int main(int argc, char* argv[]) {
 
     };
 
-    auto inputWorker = [](Engine& engine){
+    auto ioWorker = [](Engine& engine){
         while(true){
             char key;
             std::cin >> key;
@@ -161,7 +161,7 @@ int main(int argc, char* argv[]) {
         healthSucceeded = healthStatusWorker(engine, hcpPort, timeout);
     }};
 
-    std::thread inputThread{inputWorker, std::ref(engine)};
+    std::thread inputThread{ioWorker, std::ref(engine)};
 
     inputThread.join();
     healthThread.join();

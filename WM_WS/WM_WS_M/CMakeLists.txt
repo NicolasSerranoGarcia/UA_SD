@@ -6,6 +6,8 @@ add_executable(WM_WS_M src/WM_WS_M.cpp)
 
 target_compile_features(WM_WS_M PRIVATE cxx_std_23)
 
+target_include_directories(WM_WS_M PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+
 #Boost.program_options dependency for command line parsing
 find_package(Boost REQUIRED COMPONENTS program_options)
 target_link_libraries(WM_WS_M PRIVATE Boost::program_options)
@@ -22,3 +24,6 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(ninttp)
 
 target_link_libraries(WM_WS_M PRIVATE ninttp::ninttp)
+
+find_package(Threads REQUIRED)
+target_link_libraries(WM_WS_M PRIVATE Threads::Threads)
