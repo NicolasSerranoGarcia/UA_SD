@@ -2,6 +2,10 @@
 #include <cassert>
 #include <limits>
 #include <type_traits>
+#include <chrono>
+#include <cmath>
+
+using namespace std::chrono_literals;
 
 static_assert(std::is_same_v<decltype(Engine{}.start()), std::expected<void, Engine::Error>>);
 

@@ -6,7 +6,10 @@ include(cmake/boost.cmake)
 include(cmake/kafka.cmake)
 include(cmake/ninttp.cmake)
 
+add_subdirectory(src/engine)
+
 add_executable(WM_WS_E src/WM_WS_E.cpp)
+target_link_libraries(WM_WS_E PRIVATE engine_core)
 target_include_directories(WM_WS_E PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include/engine")
 target_include_directories(WM_WS_E PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_include_directories(WM_WS_E PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../shared")

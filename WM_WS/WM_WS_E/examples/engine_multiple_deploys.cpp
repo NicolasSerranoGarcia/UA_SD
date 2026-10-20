@@ -1,4 +1,4 @@
-#include "engine.hpp"
+#include "engine/engine.hpp"
 
 #include <iostream>
 #include <chrono>
@@ -11,7 +11,7 @@ int main(){
     Engine engine;
     Engine engine1;
     
-    auto e = engine.start();
+    if (!engine.start()) return 1;
     std::this_thread::sleep_for(2s);
     auto r = engine1.start();
 
