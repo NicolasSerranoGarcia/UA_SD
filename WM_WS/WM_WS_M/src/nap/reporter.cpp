@@ -3,6 +3,7 @@
 #include "nap/connection.hpp"
 #include <exception>
 #include <iostream>
+#include <syncstream>
 #include <utility>
 
 namespace nap {
@@ -43,18 +44,20 @@ bool Reporter::send(bool healthy, const std::string &reason) {
     if (result)
         result = conn.sendStatus(wsId_, healthy);
     if (!result) {
-        std::cerr << "Error: sending central status failed. Reason: " << result.error().message()
-                  << '\n';
+        std::osyncstream(std::cerr) << "[Central][NAP] ws=" << wsId_
+                                   << " status send failed: " << result.error().message() << '\n';
         return false;
     }
     auto response = conn.getResponse();
     if (!response) {
-        std::cerr << "Error: central status response failed. Reason: " << response.error().message()
-                  << '\n';
+        std::osyncstream(std::cerr) << "[Central][NAP] ws=" << wsId_
+                                   << " status acknowledgement failed: "
+                                   << response.error().message() << '\n';
         return false;
     }
-    std::cout << "CENTRAL hook: ws=" << wsId_ << " state=" << (healthy ? "healthy" : "fault")
-              << " reason=" << reason << std::endl;
+    std::osyncstream(std::cout) << "[Central][NAP] ws=" << wsId_
+                               << " status acknowledged: state=" << (healthy ? "healthy" : "fault")
+                               << " reason=" << reason << std::endl;
     return true;
 }
 
@@ -79,9 +82,11 @@ void Reporter::run() {
         try {
             acknowledged = send(healthy, reason);
         } catch (const ninttp::SocketError &error) {
-            std::cerr << "Error: central reporting socket: " << error.what() << '\n';
+            std::osyncstream(std::cerr) << "[Central][NAP] ws=" << wsId_
+                                       << " reporting socket failed: " << error.what() << '\n';
         } catch (const std::exception &error) {
-            std::cerr << "Error: central reporting: " << error.what() << '\n';
+            std::osyncstream(std::cerr) << "[Central][NAP] ws=" << wsId_
+                                       << " reporting failed: " << error.what() << '\n';
         }
         lock.lock();
         if (acknowledged && !healthy)

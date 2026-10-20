@@ -11,6 +11,7 @@
 #include <ninttp/socket/socket.hpp>
 #include <string>
 #include <string_view>
+#include <syncstream>
 #include <thread>
 
 namespace app {
@@ -19,13 +20,13 @@ namespace {
 void printAddresses(const ninttp::ResolvedAddresses &addresses) {
     for (const auto &endpoint : addresses.ipv4) {
         const auto address = endpoint.addressHostOrder();
-        std::clog << "Central IPv4 endpoint: " << ((address >> 24) & 0xff) << '.'
+        std::clog << "[Central][DNS] IPv4 endpoint: " << ((address >> 24) & 0xff) << '.'
                   << ((address >> 16) & 0xff) << '.' << ((address >> 8) & 0xff) << '.'
                   << (address & 0xff) << ':' << endpoint.portHostOrder() << '\n';
     }
     for (const auto &endpoint : addresses.ipv6) {
         const auto bytes = endpoint.addressBytes();
-        std::clog << "Central IPv6 endpoint: [";
+        std::clog << "[Central][DNS] IPv6 endpoint: [";
         const auto flags = std::clog.flags();
         std::clog << std::hex;
         for (std::size_t i = 0; i < bytes.size(); i += 2) {
@@ -67,6 +68,10 @@ bool registerAndActivate(const ninttp::IPv4Endpoint &centralEndpoint, const std:
                       << response.error().message() << std::endl;
             return false;
         }
+        std::osyncstream(std::cout) << "[Central][NAP] ws=" << wsId
+                                   << (alreadyRegistered ? " already registered; proceeding to activation"
+                                                         : " registration acknowledged")
+                                   << std::endl;
     }
 
     // Central closes the registration connection after its response.
@@ -88,6 +93,8 @@ bool registerAndActivate(const ninttp::IPv4Endpoint &centralEndpoint, const std:
                   << activationResponse.error().message() << std::endl;
         return false;
     }
+    std::osyncstream(std::cout) << "[Central][NAP] ws=" << wsId << " activation acknowledged"
+                               << std::endl;
     return true;
 }
 
@@ -118,7 +125,8 @@ std::string session(const ninttp::IPv4Endpoint &engineEndpoint, const std::strin
         const std::string_view status(response.data(), response.size());
         if (status != hcp::okMsg && status != hcp::koMsg)
             return "invalid HCP health response";
-        std::cout << status << std::endl;
+        std::osyncstream(std::cout) << "[Engine][HCP] ws=" << wsId << " health=" << status
+                                   << std::endl;
         reporter.update(status == hcp::okMsg, status);
     }
 }
@@ -149,7 +157,8 @@ int run(const Options &options) {
         } catch (const ninttp::SocketError &error) {
             failure = error.what();
         }
-        std::cerr << failure << '\n';
+        std::osyncstream(std::cerr) << "[Engine][HCP] ws=" << options.wsId
+                                   << " session failed: " << failure << '\n';
         reporter.update(false, failure);
         std::this_thread::sleep_for(options.hcpRetry);
     }
