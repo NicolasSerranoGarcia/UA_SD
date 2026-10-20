@@ -52,7 +52,9 @@ TEST(Process, EngineAcceptsNewSessionAfterInvalidRequest) {
     EXPECT_EQ(ts::receive(retry, 4), "OKOK");
 }
 
-TEST(Process, MonitorRegistersActivatesAndReportsEngineHealth) {
+class RegistrationResponse : public testing::TestWithParam<const char *> {};
+
+TEST_P(RegistrationResponse, MonitorActivatesOnNewConnectionAndReportsEngineHealth) {
     ts::Engine engine;
     engine.socket().close(); // Release the initial probe session for Monitor.
     ts::Server central;
@@ -60,9 +62,12 @@ TEST(Process, MonitorRegistersActivatesAndReportsEngineHealth) {
     {
         auto registration = central.accept();
         ASSERT_EQ(ts::receiveFrame(registration), "NAP#1.0#1#0#station-1#spain#51#FIN");
-        ts::send(registration, "NAP#1.0#1#3#station-1#14#FIN");
-        ASSERT_EQ(ts::receiveFrame(registration), "NAP#1.0#2#1#station-1#15#FIN");
-        ts::send(registration, "NAP#1.0#2#3#station-1#17#FIN");
+        ts::send(registration, GetParam());
+    } // Central closes the registration connection after replying.
+    {
+        auto activation = central.accept();
+        ASSERT_EQ(ts::receiveFrame(activation), "NAP#1.0#1#1#station-1#16#FIN");
+        ts::send(activation, "NAP#1.0#1#3#station-1#14#FIN");
     }
     {
         auto status = central.accept();
@@ -83,6 +88,10 @@ TEST(Process, MonitorRegistersActivatesAndReportsEngineHealth) {
     }
     FAIL() << "Monitor did not report the engine disconnection";
 }
+
+INSTANTIATE_TEST_SUITE_P(Nap, RegistrationResponse,
+                         testing::Values("NAP#1.0#1#3#station-1#14#FIN",
+                                         "NAP#1.0#1#4#1#station-1#01#FIN"));
 
 class ReservedZeroResponse : public testing::TestWithParam<const char *> {};
 

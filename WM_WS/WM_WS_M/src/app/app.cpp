@@ -41,28 +41,41 @@ void printAddresses(const ninttp::ResolvedAddresses &addresses) {
 
 bool registerAndActivate(const ninttp::IPv4Endpoint &centralEndpoint, const std::string &wsId,
                          std::string_view location, std::chrono::milliseconds timeout) {
-    nap::Connection<ninttp::IPv4Endpoint> conn(timeout);
+    using Connection = nap::Connection<ninttp::IPv4Endpoint>;
+    {
+        Connection registration(timeout);
 
-    auto opened = conn.open(centralEndpoint);
-    if (!opened) {
-        std::cerr << "Error: connecting to central failed. Reason: " << opened.error().message()
-                  << std::endl;
-        return false;
+        auto opened = registration.open(centralEndpoint);
+        if (!opened) {
+            std::cerr << "Error: connecting to central failed. Reason: " << opened.error().message()
+                      << std::endl;
+            return false;
+        }
+
+        auto registered = registration.sendRegistration(wsId, location);
+        if (!registered) {
+            std::cerr << "Error: sending registration failed. Reason: " << registered.error().message()
+                      << std::endl;
+            return false;
+        }
+        auto response = registration.getResponse();
+        // An existing station still needs activation when Monitor restarts.
+        const bool alreadyRegistered = !response && response.error().type == Connection::Error::Type::Nack &&
+                                       response.error().nackCode == 1;
+        if (!response && !alreadyRegistered) {
+            std::cerr << "Error: registration rejected or response failed. Reason: "
+                      << response.error().message() << std::endl;
+            return false;
+        }
     }
 
-    auto registered = conn.sendRegistration(wsId, location);
-    if (!registered) {
-        std::cerr << "Error: sending registration failed. Reason: " << registered.error().message()
-                  << std::endl;
+    // Central closes the registration connection after its response.
+    Connection conn(timeout);
+    if (auto opened = conn.open(centralEndpoint); !opened) {
+        std::cerr << "Error: connecting to central for activation failed. Reason: "
+                  << opened.error().message() << std::endl;
         return false;
     }
-    auto registrationResponse = conn.getResponse();
-    if (!registrationResponse) {
-        std::cerr << "Error: registration rejected or response failed. Reason: "
-                  << registrationResponse.error().message() << std::endl;
-        return false;
-    }
-
     auto activated = conn.sendActivation(wsId);
     if (!activated) {
         std::cerr << "Error: sending activation failed. Reason: " << activated.error().message()
