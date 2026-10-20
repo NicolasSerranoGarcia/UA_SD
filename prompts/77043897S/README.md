@@ -1,14 +1,13 @@
 # WaterManagement — AI prompt record (77043897S)
 
 Exported on 2026-09-28 from the conversation available to the assistant.
+Updated on 2026-10-20 with five prompts from the subsequent watering station work.
 
 ## Scope and format
 
-- Includes all 33 project-related user messages visible in this conversation, including the interrupted/repeated question and this export request.
+- The initial export includes all 33 project-related user messages available at that time, including the interrupted/repeated question and that export request.
 - User wording, spelling, and corrections are retained. IDE context, automatic environment messages, system/developer instructions, and tool logs are omitted.
 - Assistant replies are explicitly labeled summaries. This is a prompt record with conversational context, **not a verbatim full chat transcript**.
-- IDs record global order. Exact per-message timestamps were not available, so none have been invented.
-- Other chats, prompts used outside this conversation, and separate ninttp development conversations are not included.
 - Historical names and paths are retained. Earlier paths such as core/central, operator, and watering_station refer to the layout at that time; the workspace now contains WM_Central, WM_FO, and WM_WS.
 - Implementation and verification statements describe what was reported at that point in the conversation, not a fresh validation of the current project.
 
@@ -57,6 +56,10 @@ Exported on 2026-09-28 from the conversation available to the assistant.
 | [31](code-and-configuration-changes.md#31) | Code and configuration requests | I have just added a dns utility to ninttp to be able to resolve railway hostname in the future.… |
 | [32](code-and-configuration-changes.md#32) | Code and configuration requests | no, dont ask for a hostname, just hardcode google.com or smth. It is just to check |
 | [33](git-and-documentation.md#33) | Git and prompt documentation | I am required to add the prompts related to the project to the prompts folder. Can you add all … |
+| [34](code-and-configuration-changes.md#34) | Code and configuration requests | Can you name the nampesace in camelCase instead of underscores |
+| [35](libraries-and-build-tools.md#35) | Kafka, SQLite, C++, and build tools | add cmake files to pull ninttp and boost, so the main cmae will just have include(ninttp.cmake). add them in a cmake folder |
+| [36](libraries-and-build-tools.md#36) | Kafka, SQLite, C++, and build tools | can yuadd a fallback if google test is not found with fetch content? It will always be laucnhed inside a container but just in case |
+| [37](docker-and-railway.md#37) | Docker, Railway, and deployment | Please disable testing inside the images |
 
 ## Reference links mentioned in the conversation
 

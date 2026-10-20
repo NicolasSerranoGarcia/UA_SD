@@ -81,3 +81,23 @@ Explained that CMake supports either API. Showed find_package(PkgConfig), pkg_ch
 **Assistant — response summary**
 
 Linked the official librdkafka C++ API reference, documented header, and C++ example. Explained that RdKafka::version_str() returns the library version as std::string.
+
+## 35
+
+**User — original prompt**
+
+> add cmake files to pull ninttp and boost, so the main cmae will just have include(ninttp.cmake). add them in a cmake folder
+
+**Assistant — response summary**
+
+Moved ninttp and Boost dependency setup into separate modules under each application's cmake directory and included those modules from the main CMakeLists.txt files.
+
+## 36
+
+**User — original prompt**
+
+> can yuadd a fallback if google test is not found with fetch content? It will always be laucnhed inside a container but just in case
+
+**Assistant — response summary**
+
+Kept discovery of an installed GoogleTest package as the first choice and added a FetchContent fallback pinned to GoogleTest v1.16.0. The fallback is reached only when testing is enabled and the package is unavailable.

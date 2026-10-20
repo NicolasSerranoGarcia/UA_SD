@@ -131,3 +131,13 @@ Explained network namespaces, private container interfaces/IPs under bridge netw
 **Assistant — response summary**
 
 Expanded on namespaces, virtual Ethernet pairs, bridges, DNS, socket operations, bind addresses, and port publishing. Mapped Engine-to-Monitor and Railway connections and explained outbound NAT without publishing ports.
+
+## 37
+
+**User — original prompt**
+
+> Please disable testing inside the images
+
+**Assistant — response summary**
+
+Configured both watering station Docker builds with BUILD_TESTING=OFF and removed GoogleTest installation and test execution from the image builds.
