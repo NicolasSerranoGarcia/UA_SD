@@ -11,10 +11,10 @@
 #include <functional>
 #include <list>
 
-#include "../valve/valve.hpp"
-#include "../flow_meter/flow_meter.hpp"
-#include "../leak_detector/leak_detector.hpp"
-#include "../valid_flow.hpp"
+#include "engine/valve/valve.hpp"
+#include "engine/flow_meter/flow_meter.hpp"
+#include "engine/leak_detector/leak_detector.hpp"
+#include "engine/valid_flow.hpp"
 
 using namespace std::literals;
 
