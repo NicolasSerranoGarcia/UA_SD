@@ -1,5 +1,7 @@
 .git
-.gitkeep
+.git*
+.dockerignore
+Dockerfile
 .env
 .env.*
 __pycache__/
@@ -10,3 +12,4 @@ venv/
 *.db-*
 *.sqlite
 *.sqlite3
+test/
