@@ -23,3 +23,8 @@ target_link_libraries(WM_WS_M PRIVATE Boost::program_options ninttp::ninttp)
 
 find_package(Threads REQUIRED)
 target_link_libraries(WM_WS_M PRIVATE Threads::Threads)
+
+option(BUILD_TESTING "Build tests" ON)
+if(BUILD_TESTING)
+  include(cmake/test.cmake)
+endif()
