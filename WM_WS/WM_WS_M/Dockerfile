@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends cmake libboost-
 COPY WM_WS_M/ .
 COPY shared/ ../shared/
 
-RUN cmake -B build -S . && cmake --build build/
+RUN cmake -B build -S . -DBUILD_TESTING=OFF \
+    && cmake --build build/
 
 CMD ["./build/WM_WS_M"]
