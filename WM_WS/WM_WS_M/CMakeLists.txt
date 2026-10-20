@@ -5,7 +5,7 @@ project(watering_station_monitor)
 include(cmake/boost.cmake)
 include(cmake/ninttp.cmake)
 
-add_executable(WM_WS_M src/WM_WS_M.cpp)
+add_executable(WM_WS_M src/WM_WS_M.cpp src/nap/reporter.cpp)
 
 target_compile_features(WM_WS_M PRIVATE cxx_std_23)
 
