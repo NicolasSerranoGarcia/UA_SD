@@ -101,7 +101,8 @@ appropriate [NACK error code](#nack-error-codes):
 ```text
 NAP#<protocol-version>#<ack-code>#4#<error-code>#<station_id>#<LRC>#FIN
 ```
-The `<station_id>` is the station which the nack is directed to.
+The `<station_id>` is the station which the nack is directed to.<br>
+In this message, an `<ack_code> = 0` means that the central could not find the `NAP` initiator and was unable to parse the frame
 
 <br>
 
