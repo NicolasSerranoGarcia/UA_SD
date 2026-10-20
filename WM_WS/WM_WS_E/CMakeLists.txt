@@ -26,3 +26,8 @@ target_link_libraries(WM_WS_E PRIVATE Boost::program_options ninttp::ninttp)
 if(BUILD_EXAMPLES)
   add_subdirectory(examples)
 endif()
+
+option(BUILD_TESTING "Build tests" ON)
+if(BUILD_TESTING)
+  include(cmake/test.cmake)
+endif()

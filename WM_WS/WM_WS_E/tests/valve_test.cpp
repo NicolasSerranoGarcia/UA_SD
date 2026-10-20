@@ -1,38 +1,48 @@
-#include "engine/valve/valve.hpp"
 #include "engine/flow_meter/flow_meter.hpp"
-#include <cassert>
+#include "engine/valve/valve.hpp"
+
+#include <gtest/gtest.h>
 #include <limits>
+#include <stdexcept>
 
-int main() {
-    internal::Valve healthy;
-    assert(healthy.openBy(20));
-    assert(internal::FlowMeter::measure(healthy) == 20);
-    assert(healthy.closeBy(5));
-    assert(internal::FlowMeter::measure(healthy) == 15);
-    for (float bad : {-1.f, 91.f, std::numeric_limits<float>::infinity(),
-                      std::numeric_limits<float>::quiet_NaN()}) {
-        auto result = healthy.openBy(bad);
-        assert(!result && result.error().type == internal::Valve::ErrorType::InvalidFlow);
-        assert(!healthy.closeBy(bad));
-        assert(internal::FlowMeter::measure(healthy) == 15);
-        bool threw = false;
-        try { internal::Valve invalid(bad); } catch (const std::invalid_argument&) { threw = true; }
-        assert(threw);
+TEST(Valve, AdjustsFlowWithinBounds) {
+    internal::Valve valve;
+    ASSERT_TRUE(valve.openBy(20).has_value());
+    EXPECT_EQ(internal::FlowMeter::measure(valve), 20);
+    ASSERT_TRUE(valve.closeBy(5).has_value());
+    EXPECT_EQ(internal::FlowMeter::measure(valve), 15);
+    EXPECT_FALSE(valve.closeBy(16).has_value());
+    EXPECT_FALSE(valve.openBy(76).has_value());
+    EXPECT_EQ(internal::FlowMeter::measure(valve), 15);
+    valve.openFully();
+    EXPECT_EQ(internal::FlowMeter::measure(valve), 90);
+    valve.close();
+    EXPECT_EQ(internal::FlowMeter::measure(valve), 0);
+}
+
+TEST(Valve, RejectsInvalidAdjustmentsAndStartupFlow) {
+    internal::Valve valve(15);
+    for (float invalid : {-1.f, 91.f, std::numeric_limits<float>::infinity(),
+                          std::numeric_limits<float>::quiet_NaN()}) {
+        SCOPED_TRACE(invalid);
+        const auto result = valve.openBy(invalid);
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().type, internal::Valve::ErrorType::InvalidFlow);
+        EXPECT_FALSE(valve.closeBy(invalid).has_value());
+        EXPECT_EQ(internal::FlowMeter::measure(valve), 15);
+        EXPECT_THROW((void)internal::Valve{invalid}, std::invalid_argument);
     }
-    assert(!healthy.closeBy(16));
-    assert(!healthy.openBy(76));
-    healthy.openFully();
-    assert(internal::FlowMeter::measure(healthy) == 90);
-    healthy.close();
-    assert(internal::FlowMeter::measure(healthy) == 0);
+}
 
-    // Repeated use no longer injects physical faults.
+TEST(Valve, RepeatedUseDoesNotInjectPhysicalFaults) {
+    internal::Valve valve;
     for (int i = 0; i < 100; ++i) {
-        healthy.openFully();
-        assert(internal::FlowMeter::measure(healthy) == internal::Valve::maxFlux);
-        healthy.close();
-        assert(internal::FlowMeter::measure(healthy) == 0);
-        healthy.close();
-        assert(internal::FlowMeter::measure(healthy) == 0);
+        SCOPED_TRACE(i);
+        valve.openFully();
+        EXPECT_EQ(internal::FlowMeter::measure(valve), internal::Valve::maxFlux);
+        valve.close();
+        EXPECT_EQ(internal::FlowMeter::measure(valve), 0);
+        valve.close();
+        EXPECT_EQ(internal::FlowMeter::measure(valve), 0);
     }
 }

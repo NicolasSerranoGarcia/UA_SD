@@ -1,88 +1,129 @@
-#include "../include/engine/engine.hpp"
-#include <cassert>
-#include <limits>
-#include <type_traits>
+#include "engine/engine.hpp"
+
 #include <chrono>
 #include <cmath>
-
-using namespace std::chrono_literals;
+#include <gtest/gtest.h>
+#include <limits>
+#include <thread>
+#include <type_traits>
 
 static_assert(std::is_same_v<decltype(Engine{}.start()), std::expected<void, Engine::Error>>);
 
-int main() {
+TEST(Engine, RejectsInvalidFlowWithoutStarting) {
     Engine engine;
-    assert(!engine.isRunning());
-    assert(engine.timeToShutdown() == 0s);
+    EXPECT_FALSE(engine.isRunning());
+    EXPECT_EQ(engine.timeToShutdown(), std::chrono::seconds{0});
     for (float invalid : {-1.f, 91.f, std::numeric_limits<float>::infinity(),
                           std::numeric_limits<float>::quiet_NaN()}) {
+        SCOPED_TRACE(invalid);
         const auto result = engine.start(invalid);
-        assert(!result);
-        assert(result.error().type == Engine::ErrorType::InvalidFlow);
-        assert(result.error().invalidFlow);
-        assert(result.error().invalidFlow->maximum == internal::Valve::maxFlux);
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().type, Engine::ErrorType::InvalidFlow);
+        ASSERT_TRUE(result.error().invalidFlow.has_value());
+        EXPECT_EQ(result.error().invalidFlow->maximum, internal::Valve::maxFlux);
         const auto requested = result.error().invalidFlow->requested;
-        assert(std::isnan(invalid) ? std::isnan(requested) : requested == invalid);
+        if (std::isnan(invalid))
+            EXPECT_TRUE(std::isnan(requested));
+        else
+            EXPECT_EQ(requested, invalid);
+        EXPECT_FALSE(engine.isRunning());
+        EXPECT_EQ(engine.measureFlow(), 0);
     }
-    // Rejected inputs did not transition the engine to Watering.
-    assert(engine.start(40));
-    assert(engine.isRunning());
-    assert(engine.timeToShutdown() > 0s);
-    auto repeated = engine.start(40);
-    assert(!repeated && repeated.error().type == Engine::ErrorType::AlreadyWatering);
-    assert(!repeated.error().invalidFlow);
+    EXPECT_TRUE(engine.start(40).has_value());
+}
 
-    assert(engine.stop());
-    assert(!engine.isRunning());
-    assert(engine.timeToShutdown() == 0s);
-    assert(engine.measureFlow() == 0);
-    assert(!engine.isRunning());
-    assert(engine.start()); // Normal stop does not block future irrigation.
+TEST(Engine, StartsStopsAndRestarts) {
+    Engine engine;
+    ASSERT_TRUE(engine.start(40).has_value());
+    EXPECT_TRUE(engine.isRunning());
+    EXPECT_GT(engine.timeToShutdown(), std::chrono::seconds{0});
+    EXPECT_EQ(engine.measureFlow(), 40);
+    const auto repeated = engine.start(40);
+    ASSERT_FALSE(repeated.has_value());
+    EXPECT_EQ(repeated.error().type, Engine::ErrorType::AlreadyWatering);
+    EXPECT_FALSE(repeated.error().invalidFlow.has_value());
+    ASSERT_TRUE(engine.stop().has_value());
+    EXPECT_FALSE(engine.isRunning());
+    EXPECT_EQ(engine.timeToShutdown(), std::chrono::seconds{0});
+    EXPECT_EQ(engine.measureFlow(), 0);
+    const auto stopped = engine.stop();
+    ASSERT_FALSE(stopped.has_value());
+    EXPECT_EQ(stopped.error().type, Engine::ErrorType::AlreadyStopped);
+    EXPECT_TRUE(engine.start().has_value());
+}
+
+TEST(Engine, StoppingDoesNotRepairFault) {
+    Engine engine;
+    ASSERT_TRUE(engine.start().has_value());
     engine.injectFault();
-    assert(engine.measureFlow() == 0);
-    assert(!engine.isRunning());
-    auto health = engine.isHealthy();
-    assert(!health);
-    auto faultedStart = engine.start();
-    assert(!faultedStart && faultedStart.error().type == Engine::ErrorType::Fault);
-    assert(engine.stop());
-    assert(!engine.isRunning());
-    assert(engine.timeToShutdown() == 0s);
-    assert(!engine.isHealthy()); // Stopping does not repair a fault.
+    EXPECT_EQ(engine.measureFlow(), 0);
+    EXPECT_FALSE(engine.isRunning());
+    EXPECT_FALSE(engine.isHealthy());
+    const auto faulted = engine.start();
+    ASSERT_FALSE(faulted.has_value());
+    EXPECT_EQ(faulted.error().type, Engine::ErrorType::Fault);
+    ASSERT_TRUE(engine.stop().has_value());
+    EXPECT_FALSE(engine.isHealthy());
+    EXPECT_EQ(engine.timeToShutdown(), std::chrono::seconds{0});
     engine.repair();
-    assert(engine.isHealthy());
-    assert(engine.measureFlow() == 0);
-    assert(!engine.isRunning());
-    assert(engine.start());
+    EXPECT_TRUE(engine.isHealthy());
+    EXPECT_FALSE(engine.isRunning());
+    EXPECT_EQ(engine.measureFlow(), 0);
+    EXPECT_TRUE(engine.start().has_value());
+}
 
-    assert(engine.block(0));
-    assert(engine.measureFlow() == 0);
-    assert(!engine.isRunning());
-    auto blockedStart = engine.start();
-    assert(!blockedStart && blockedStart.error().type == Engine::ErrorType::BlockedByCentral);
+TEST(Engine, BlockingStopsIrrigationAndUnblockingDoesNotRepairFault) {
+    Engine engine;
+    ASSERT_TRUE(engine.start().has_value());
+    ASSERT_TRUE(engine.block(0).has_value());
+    EXPECT_FALSE(engine.isRunning());
+    EXPECT_EQ(engine.measureFlow(), 0);
+    const auto blocked = engine.start();
+    ASSERT_FALSE(blocked.has_value());
+    EXPECT_EQ(blocked.error().type, Engine::ErrorType::BlockedByCentral);
     engine.injectFault();
-    assert(engine.unblock(0));
-    assert(!engine.isHealthy()); // Unblocking does not repair a fault.
-    assert(!engine.start());
-    assert(engine.block(0));
-    engine.repair();
-    assert(engine.isHealthy());
-    blockedStart = engine.start();
-    assert(!blockedStart && blockedStart.error().type == Engine::ErrorType::BlockedByCentral);
-    assert(engine.unblock(0));
-    assert(engine.measureFlow() == 0);
-    assert(!engine.isRunning()); // Unblocking does not start irrigation.
-    assert(engine.start());
-    assert(engine.stop());
-    assert(!engine.isRunning());
-    assert(engine.timeToShutdown() == 0s);
-    auto stopped = engine.stop();
-    assert(!stopped && stopped.error().type == Engine::ErrorType::AlreadyStopped);
-    engine.injectFault(); // Faults can also be injected while idle.
-    assert(!engine.isHealthy());
-    assert(!engine.start());
-    engine.repair();
-    assert(engine.start());
+    ASSERT_TRUE(engine.unblock(0).has_value());
+    EXPECT_FALSE(engine.isHealthy());
+    EXPECT_FALSE(engine.start().has_value());
+}
 
-    Engine configured(Engine::Config{.irrigationTimeoutLimit = 120});
-    assert(configured.start());
+TEST(Engine, RepairDoesNotRemoveCentralBlock) {
+    Engine engine;
+    ASSERT_TRUE(engine.block(0).has_value());
+    engine.injectFault();
+    engine.repair();
+    EXPECT_TRUE(engine.isHealthy());
+    const auto blocked = engine.start();
+    ASSERT_FALSE(blocked.has_value());
+    EXPECT_EQ(blocked.error().type, Engine::ErrorType::BlockedByCentral);
+    ASSERT_TRUE(engine.unblock(0).has_value());
+    EXPECT_FALSE(engine.isRunning());
+    EXPECT_EQ(engine.measureFlow(), 0);
+    EXPECT_TRUE(engine.start().has_value());
+}
+
+TEST(Engine, FaultCanBeInjectedWhileIdle) {
+    Engine engine;
+    engine.injectFault();
+    EXPECT_FALSE(engine.isHealthy());
+    EXPECT_FALSE(engine.start().has_value());
+    engine.repair();
+    EXPECT_TRUE(engine.start().has_value());
+}
+
+TEST(Engine, WorkerStopsExpiredIrrigation) {
+    Engine engine(Engine::Config{.irrigationTimeoutLimit = 0});
+    ASSERT_TRUE(engine.start().has_value());
+    const auto waitLimit = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+    while (engine.isRunning() && std::chrono::steady_clock::now() < waitLimit)
+        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    EXPECT_FALSE(engine.isRunning());
+    EXPECT_EQ(engine.measureFlow(), 0);
+}
+
+TEST(Engine, UsesConfiguredTimeout) {
+    Engine engine(Engine::Config{.irrigationTimeoutLimit = 120});
+    ASSERT_TRUE(engine.start().has_value());
+    EXPECT_GT(engine.timeToShutdown(), std::chrono::seconds{118});
+    EXPECT_LE(engine.timeToShutdown(), std::chrono::seconds{120});
 }
