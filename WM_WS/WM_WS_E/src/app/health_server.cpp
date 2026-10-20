@@ -7,6 +7,7 @@
 #include <ninttp/endpoints.hpp>
 #include <ninttp/socket/socket.hpp>
 #include <string_view>
+#include <syncstream>
 
 namespace app {
 namespace {
@@ -23,10 +24,12 @@ std::expected<void, std::string> respondToHealth(const Engine &engine,
         return std::unexpected(result.error().message());
     if (std::string_view{request.data(), request.size()} != "HC")
         return std::unexpected(std::string{"invalid HCP health request"});
-    if (const auto result =
-            hcp::sendExact(socket, engine.isHealthy() ? hcp::okMsg : hcp::koMsg, deadline(timeout));
+    const auto status = engine.isHealthy() ? hcp::okMsg : hcp::koMsg;
+    if (const auto result = hcp::sendExact(socket, status, deadline(timeout));
         !result)
         return std::unexpected(result.error().message());
+    std::osyncstream(std::cout) << "[Monitor][HCP] ws=" << engine.wsId()
+                               << " health response=" << status << std::endl;
     return {};
 }
 
@@ -40,6 +43,7 @@ std::expected<void, std::string> serveHealth(Engine &engine, std::uint16_t port,
         return std::unexpected(std::string{"HCP bind: "} + result.error().what());
     if (const auto result = listener.listen(1); !result)
         return std::unexpected(std::string{"HCP listen: "} + result.error().what());
+    std::osyncstream(std::cout) << "[Monitor][HCP] listening on 0.0.0.0:" << port << std::endl;
 
     while (true) {
         auto accepted = listener.accept(false);
@@ -52,19 +56,24 @@ std::expected<void, std::string> serveHealth(Engine &engine, std::uint16_t port,
         std::string wsId;
         if (!hcp::receiveId(socket, wsId, deadline(timeout))) {
             (void)hcp::sendExact(socket, hcp::koMsg, deadline(timeout));
-            std::cerr << "Error: missing, timed out, or invalid HCP WS ID\n";
+            std::osyncstream(std::cerr)
+                << "[Monitor][HCP] identification rejected: missing, timed out, or invalid WS ID\n";
             continue;
         }
         engine.setWsId(wsId);
         if (const auto result = hcp::sendExact(socket, hcp::okMsg, deadline(timeout)); !result) {
-            std::cerr << result.error().message() << '\n';
+            std::osyncstream(std::cerr) << "[Monitor][HCP] ws=" << wsId
+                                       << " identification response failed: "
+                                       << result.error().message() << '\n';
             continue;
         }
-        std::cout << "HCP station ID: " << engine.wsId() << '\n';
+        std::osyncstream(std::cout) << "[Monitor][HCP] ws=" << wsId << " identification accepted"
+                                   << std::endl;
         while (true) {
             if (const auto result = respondToHealth(engine, socket, timeout); !result) {
-                std::cerr << "HCP session ended: " << result.error()
-                          << "; waiting for Monitor to reconnect\n";
+                std::osyncstream(std::cerr) << "[Monitor][HCP] ws=" << wsId
+                                           << " session ended: " << result.error()
+                                           << "; waiting for Monitor to reconnect\n";
                 break;
             }
         }

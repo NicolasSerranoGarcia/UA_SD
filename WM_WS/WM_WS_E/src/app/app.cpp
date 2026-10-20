@@ -12,6 +12,7 @@
 #include <stop_token>
 #include <string>
 #include <system_error>
+#include <syncstream>
 #include <thread>
 
 namespace app {
@@ -39,8 +40,11 @@ void readConsole(std::stop_token stop, Engine &engine) {
             const auto input = poll::poll(std::chrono::milliseconds{100});
             if (!input)
                 throw std::system_error(input.error(), "polling console input");
-            if (input->status == poll::Status::Closed)
+            if (input->status == poll::Status::Closed) {
+                std::osyncstream(std::cout)
+                    << "[Engine][Console] input closed; health service continues" << std::endl;
                 return;
+            }
             if (input->status == poll::Status::Timeout)
                 continue;
             const char key = input->character;
@@ -48,17 +52,21 @@ void readConsole(std::stop_token stop, Engine &engine) {
             case 'f':
             case 'F':
                 engine.injectFault();
+                std::osyncstream(std::cout) << "[Engine][Console] fault injected; health=KO"
+                                           << std::endl;
                 break;
             case 'r':
             case 'R':
                 engine.repair();
+                std::osyncstream(std::cout) << "[Engine][Console] repair completed; health=OK"
+                                           << std::endl;
                 break;
             default:
                 break;
             }
         }
     } catch (const std::exception &error) {
-        std::cerr << "Error: " << error.what() << '\n';
+        std::osyncstream(std::cerr) << "[Engine][Console] input failed: " << error.what() << '\n';
     }
 }
 
@@ -67,14 +75,18 @@ void readConsole(std::stop_token stop, Engine &engine) {
 int run(const Options &options) {
     auto producer = createProducer(options.queueEndpoint);
     if (!producer) {
-        std::cerr << "Error: " << producer.error() << '\n';
+        std::osyncstream(std::cerr) << "[Engine][Kafka] producer initialization failed: "
+                                   << producer.error() << '\n';
         return 1;
     }
+    std::osyncstream(std::cout) << "[Engine][Kafka] producer initialized; bootstrap="
+                               << options.queueEndpoint << std::endl;
     Engine engine;
     std::jthread input([&engine](std::stop_token stop) { readConsole(stop, engine); });
     const auto result = serveHealth(engine, options.hcpPort, options.hcpTimeout);
     if (!result) {
-        std::cerr << "Error: " << result.error() << '\n';
+        std::osyncstream(std::cerr) << "[Monitor][HCP] health service failed: " << result.error()
+                                   << '\n';
         return 1;
     }
     return 0;
