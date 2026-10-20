@@ -1,0 +1,6 @@
+#pragma once
+
+namespace testSupport {
+inline constexpr char enginePath[] = R"path(@ENGINE_EXECUTABLE@)path";
+inline constexpr char monitorPath[] = R"path(@MONITOR_EXECUTABLE@)path";
+} // namespace testSupport
