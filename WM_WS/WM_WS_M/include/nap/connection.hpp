@@ -1,9 +1,11 @@
 #pragma once
 
-#include "../../../shared/hcp.hpp"
+#include "hcp.hpp"
 
 #include <array>
 #include <charconv>
+#include <chrono>
+#include <system_error>
 #include <expected>
 #include <optional>
 #include <string>
@@ -201,7 +203,9 @@ namespace nap {
                 (void)sock_.close(); // A partial send cannot safely be retried on this stream.
                 return std::unexpected{fromIoError(sent.error())};
             }
-            pendingAck_ = PendingRequest{nextAck_++, std::string{stationId}};
+            pendingAck_ = PendingRequest{nextAck_, std::string{stationId}};
+            // Zero is reserved for Central's unrelated initial parse errors, even on rollover.
+            if (++nextAck_ == 0) nextAck_ = 1;
             return {};
         }
 
@@ -212,7 +216,7 @@ namespace nap {
         }
 
         std::chrono::milliseconds timeout_;
-        unsigned int nextAck_ = 0;
+        unsigned int nextAck_ = 1;
         struct PendingRequest {
             unsigned int code;
             std::string stationId;
