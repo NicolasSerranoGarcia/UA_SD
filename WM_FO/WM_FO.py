@@ -18,9 +18,41 @@ def flush_cmd():
     command = "clear" if os.name != "nt" else "cls"
     subprocess.run(command, shell=True)
 
-def read_file(file_path: str):
+def read_file(file_path: str) -> list:
 
-    return
+    
+    try:
+        
+        with open(file_path, mode="r", encoding="utf-8") as file:
+            
+            raw_lines = file.readlines()
+            commands = []
+            for line in raw_lines:
+                
+                command = line.strip()
+                
+                if not command:
+                    continue
+                
+                command = command.split("#")
+                
+                if len(command) >= 2:
+                    command[0] = int(command[0])
+                    command[1] = int(command[1])
+                    commands.append(tuple(command))
+                
+                else:
+                    commands.append(int(line))
+                
+                
+    except OSError:
+        
+        print(f"File '{file_path}' does not exists. Try again")
+        return None
+                  
+            
+    return commands
+    
     
 def main():
 
@@ -59,22 +91,34 @@ def main():
                     
                 case 5:
                     
-                    file_path = input("Enter the path of the file: ")
-                    read_file(file_path)
-                    
+                    while True:
+                        
+                        file_path = input("Enter the path of the file ('q' to cancel): ").strip()
+                        
+                        if file_path == 'q':
+                            
+                            break
+                        
+                        comms = read_file(file_path=file_path)
+                        
+                        if comms is not None:
+                            
+                            # TODO
+                            print(comms)
+                            break
+
                 case _:
                     print("Invalid option")
-            
-            time.sleep(2)
-            flush_cmd()
             
             print_menu()
             input_option = int(input("Select an option: "))
     
     except KeyboardInterrupt:
-        print("\nInterrupted.Exiting...")
-        exit(0)
+        print("\nInterrupted. Exiting...")
+        exit(1)
     
+    print("\nExiting the aplication. Come back soon.")
+    exit(0)
 
 if __name__ == "__main__":
     main()
