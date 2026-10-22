@@ -6,22 +6,10 @@ include(cmake/boost.cmake)
 include(cmake/kafka.cmake)
 include(cmake/ninttp.cmake)
 
-add_subdirectory(src/engine)
+add_subdirectory(src)
 
-add_executable(WM_WS_E
-  src/WM_WS_E.cpp
-  src/app/app.cpp
-  src/app/options.cpp
-  src/app/health_server.cpp
-)
-target_link_libraries(WM_WS_E PRIVATE engine_core)
-target_include_directories(WM_WS_E PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../shared")
-
-#librdkafka++ dependency
-target_compile_features(WM_WS_E PRIVATE cxx_std_23)
-target_link_libraries(WM_WS_E PRIVATE wm_ws_kafka)
-
-target_link_libraries(WM_WS_E PRIVATE Boost::program_options ninttp::ninttp)
+add_executable(WM_WS_E src/WM_WS_E.cpp)
+target_link_libraries(WM_WS_E PRIVATE wm_ws_engine)
 
 if(BUILD_EXAMPLES)
   add_subdirectory(examples)
