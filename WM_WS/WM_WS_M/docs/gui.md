@@ -1,7 +1,9 @@
 # Monitor GUI
 
 Configure Monitor with `-DBUILD_GUI=ON` to build the Qt6 panel. The default
-`-DBUILD_GUI=OFF` uses the existing terminal entry point. Both builds take the
+`-DBUILD_GUI=OFF` runs the terminal app. Both builds share `src/WM_WS_M.cpp` as
+their entry point; CMake defines `BUILD_GUI` as `1` or `0` for that executable
+to select `gui::run` or `app::run`. Both builds take the
 same command-line options and retain stdout/stderr logging. On Windows the
 executable keeps the console subsystem (`WIN32_EXECUTABLE OFF`), including
 when the Qt window is enabled.
