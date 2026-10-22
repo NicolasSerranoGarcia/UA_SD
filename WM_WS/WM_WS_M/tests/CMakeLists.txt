@@ -22,3 +22,10 @@ gtest_discover_tests(monitor_connect_test PROPERTIES TIMEOUT 10)
 add_executable(monitor_app_test app_test.cpp)
 target_link_libraries(monitor_app_test PRIVATE wm_ws_monitor GTest::gtest_main Boost::headers)
 gtest_discover_tests(monitor_app_test PROPERTIES TIMEOUT 10)
+
+if(BUILD_GUI)
+  add_executable(monitor_window_test window_test.cpp)
+  target_link_libraries(monitor_window_test PRIVATE wm_ws_monitor_gui GTest::gtest)
+  gtest_discover_tests(monitor_window_test PROPERTIES TIMEOUT 10
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endif()
