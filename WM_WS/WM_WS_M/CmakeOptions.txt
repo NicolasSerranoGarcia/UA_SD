@@ -1,0 +1,4 @@
+include_guard(DIRECTORY)
+
+option(BUILD_GUI "Build Monitor with Qt6 GUI support" OFF)
+option(BUILD_TESTING "Build tests" ON)

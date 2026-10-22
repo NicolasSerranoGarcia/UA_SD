@@ -2,13 +2,14 @@ cmake_minimum_required(VERSION 3.21)
 
 project(watering_station_monitor)
 
+include(CmakeOptions.txt)
+
 include(cmake/boost.cmake)
 include(cmake/ninttp.cmake)
 find_package(Threads REQUIRED)
 
 add_subdirectory(src)
 
-option(BUILD_GUI "Build Monitor with Qt6 GUI support" OFF)
 add_executable(WM_WS_M src/WM_WS_M.cpp)
 target_compile_definitions(WM_WS_M PRIVATE BUILD_GUI=$<BOOL:${BUILD_GUI}>)
 
@@ -25,7 +26,6 @@ endif()
 # Keep the console subsystem in GUI builds so stdout/stderr stay available.
 set_target_properties(WM_WS_M PROPERTIES WIN32_EXECUTABLE OFF)
 
-option(BUILD_TESTING "Build tests" ON)
 if(BUILD_TESTING)
   include(cmake/test.cmake)
 endif()
