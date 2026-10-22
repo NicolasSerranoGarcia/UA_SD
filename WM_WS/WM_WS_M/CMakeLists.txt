@@ -24,6 +24,13 @@ target_link_libraries(WM_WS_M PRIVATE Boost::program_options ninttp::ninttp)
 find_package(Threads REQUIRED)
 target_link_libraries(WM_WS_M PRIVATE Threads::Threads)
 
+option(BUILD_GUI "Build Monitor with Qt6 GUI support" OFF)
+if(BUILD_GUI)
+  include(cmake/qt.cmake)
+  target_link_libraries(WM_WS_M PRIVATE wm_ws_qt)
+  set_target_properties(WM_WS_M PROPERTIES AUTOMOC ON AUTOUIC OFF AUTORCC ON)
+endif()
+
 option(BUILD_TESTING "Build tests" ON)
 if(BUILD_TESTING)
   include(cmake/test.cmake)
