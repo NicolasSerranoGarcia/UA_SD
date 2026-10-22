@@ -3,7 +3,7 @@ import time
 import os
 import subprocess
 import json
-from confluent_kafka import Consumer, Producer
+from confluent_kafka import Consumer, Producer, KafkaException
 
 FORMAT = 'utf-8'
 
@@ -79,9 +79,23 @@ def main():
 
     global operator_id; operator_id = args.ID
     
-    producer = Producer(
-        {"bootstrap.servers":f"{args.kafka_ip}:{args.kafka_port}"}
-    )
+    kafka_config = {
+    "bootstrap.servers": f"{args.kafka_ip}:{args.kafka_port}",
+
+        "log_cb": lambda *args: None,  
+        "error_cb": lambda err: None, 
+        "log_level": 0,
+        "socket.timeout.ms": 2000,
+        "message.timeout.ms": 3000,
+    }   
+    
+    try:
+        
+        producer = Producer(kafka_config)
+
+    except KafkaException as e:
+        
+        producer = None
       
     print_menu()
     try:    
@@ -93,7 +107,7 @@ def main():
                 
                 case 1:
                     
-                    station_id = int(input("Select station to irrigate (q to exit): "))
+                    station_id = input("Select station to irrigate (q to exit): ")
                     
                     if station_id != 'q':
                         
@@ -102,23 +116,23 @@ def main():
                         if duration != 'q':
                             
                             duration = int(duration) if duration else 120
-                            send_command(producer=producer, station_id=station_id, type="IRRIGATION", duration=duration)
+                            send_command(producer=producer, station_id=int(station_id), type="IRRIGATION", duration=duration)
                     
                 case 2:
                     
-                    station_id = int(input("Select station to block (q to exit): "))
+                    station_id = input("Select station to block (q to exit): ")
                     
                     if station_id != 'q':
                         
-                        send_command(producer=producer, station_id=station_id, type="BLOCK")
+                        send_command(producer=producer, station_id=int(station_id), type="BLOCK")
                     
                 case 3  :
                     
-                    station_id = int(input("Select station to activate (q to exit): "))
+                    station_id = input("Select station to activate (q to exit): ")
                     
                     if station_id != 'q':
                         
-                        send_command(producer=producer, station_id=station_id, type="ACTIVATE")
+                        send_command(producer=producer, station_id=int(station_id), type="ACTIVATE")
                     
                 case 4:
                     print("Showing stations...")
