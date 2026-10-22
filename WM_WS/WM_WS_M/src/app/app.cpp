@@ -6,7 +6,9 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <condition_variable>
 #include <iostream>
+#include <mutex>
 #include <ninttp/dns/dns.hpp>
 #include <ninttp/socket/socket.hpp>
 #include <string>
@@ -40,34 +42,36 @@ void printAddresses(const ninttp::ResolvedAddresses &addresses) {
     }
 }
 
-bool registerAndActivate(const ninttp::IPv4Endpoint &centralEndpoint, const std::string &wsId,
-                         std::string_view location, std::chrono::milliseconds timeout) {
+std::expected<void, std::string>
+registerAndActivate(const ninttp::IPv4Endpoint &centralEndpoint, const std::string &wsId,
+                    std::string_view location, std::chrono::milliseconds timeout,
+                    std::stop_token stop) {
     using Connection = nap::Connection<ninttp::IPv4Endpoint>;
     {
         Connection registration(timeout);
 
         auto opened = registration.open(centralEndpoint);
         if (!opened) {
-            std::cerr << "Error: connecting to central failed. Reason: " << opened.error().message()
-                      << std::endl;
-            return false;
+            return std::unexpected("connecting to central failed. Reason: " + opened.error().message());
         }
+        if (stop.stop_requested())
+            return {};
 
         auto registered = registration.sendRegistration(wsId, location);
         if (!registered) {
-            std::cerr << "Error: sending registration failed. Reason: " << registered.error().message()
-                      << std::endl;
-            return false;
+            return std::unexpected("sending registration failed. Reason: " + registered.error().message());
         }
+        if (stop.stop_requested())
+            return {};
         auto response = registration.getResponse();
         // An existing station still needs activation when Monitor restarts.
         const bool alreadyRegistered = !response && response.error().type == Connection::Error::Type::Nack &&
                                        response.error().nackCode == 1;
         if (!response && !alreadyRegistered) {
-            std::cerr << "Error: registration rejected or response failed. Reason: "
-                      << response.error().message() << std::endl;
-            return false;
+            return std::unexpected("registration rejected or response failed. Reason: " + response.error().message());
         }
+        if (stop.stop_requested())
+            return {};
         std::osyncstream(std::cout) << "[Central][NAP] ws=" << wsId
                                    << (alreadyRegistered ? " already registered; proceeding to activation"
                                                          : " registration acknowledged")
@@ -77,25 +81,23 @@ bool registerAndActivate(const ninttp::IPv4Endpoint &centralEndpoint, const std:
     // Central closes the registration connection after its response.
     Connection conn(timeout);
     if (auto opened = conn.open(centralEndpoint); !opened) {
-        std::cerr << "Error: connecting to central for activation failed. Reason: "
-                  << opened.error().message() << std::endl;
-        return false;
+        return std::unexpected("connecting to central for activation failed. Reason: " + opened.error().message());
     }
+    if (stop.stop_requested())
+        return {};
     auto activated = conn.sendActivation(wsId);
     if (!activated) {
-        std::cerr << "Error: sending activation failed. Reason: " << activated.error().message()
-                  << std::endl;
-        return false;
+        return std::unexpected("sending activation failed. Reason: " + activated.error().message());
     }
+    if (stop.stop_requested())
+        return {};
     auto activationResponse = conn.getResponse();
     if (!activationResponse) {
-        std::cerr << "Error: activation rejected or response failed. Reason: "
-                  << activationResponse.error().message() << std::endl;
-        return false;
+        return std::unexpected("activation rejected or response failed. Reason: " + activationResponse.error().message());
     }
     std::osyncstream(std::cout) << "[Central][NAP] ws=" << wsId << " activation acknowledged"
                                << std::endl;
-    return true;
+    return {};
 }
 
 hcp::Deadline deadline(std::chrono::milliseconds timeout) {
@@ -103,21 +105,31 @@ hcp::Deadline deadline(std::chrono::milliseconds timeout) {
 }
 
 std::string session(const ninttp::IPv4Endpoint &engineEndpoint, const std::string &wsId,
-                    std::chrono::milliseconds timeout, nap::Reporter &reporter) {
+                    std::chrono::milliseconds timeout, nap::Reporter &reporter,
+                    std::stop_token stop, Status &snapshot, const StatusObserver &observer) {
     // Return session failures so the caller can report KO and reconnect.
     ninttp::StreamSocket<ninttp::IPv4Endpoint> socket(ninttp::Protocol::Tcp, false);
     if (auto result = hcp::connectWithin(socket, engineEndpoint, deadline(timeout)); !result)
         return "connect: " + result.error().message();
+    if (stop.stop_requested())
+        return {};
     if (auto result = hcp::sendExact(socket, "ID " + wsId + "\n", deadline(timeout)); !result)
         return "identification send: " + result.error().message();
+    if (stop.stop_requested())
+        return {};
     std::array<char, 2> response{};
     if (auto result = hcp::receiveExact(socket, response, deadline(timeout)); !result)
         return "identification response: " + result.error().message();
     if (std::string_view(response.data(), response.size()) != hcp::okMsg)
         return "Engine rejected or returned an invalid WS-ID acknowledgement";
 
-    while (true) {
-        std::this_thread::sleep_for(std::chrono::seconds{1});
+    std::mutex mutex;
+    std::condition_variable_any wake;
+    while (!stop.stop_requested()) {
+        std::unique_lock lock(mutex);
+        wake.wait_for(lock, stop, std::chrono::seconds{1}, [] { return false; });
+        if (stop.stop_requested())
+            break;
         if (auto result = hcp::sendExact(socket, "HC", deadline(timeout)); !result)
             return "health request: " + result.error().message();
         if (auto result = hcp::receiveExact(socket, response, deadline(timeout)); !result)
@@ -128,40 +140,89 @@ std::string session(const ninttp::IPv4Endpoint &engineEndpoint, const std::strin
         std::osyncstream(std::cout) << "[Engine][HCP] ws=" << wsId << " health=" << status
                                    << std::endl;
         reporter.update(status == hcp::okMsg, status);
+        snapshot.phase = Phase::Monitoring;
+        snapshot.health = status == hcp::okMsg ? Health::Ok : Health::Ko;
+        snapshot.lastHealth = std::chrono::system_clock::now();
+        if (observer)
+            observer(snapshot);
     }
+    return {};
 }
 
 } // namespace
 
-int run(const Options &options) {
-    const auto addresses = ninttp::dns::resolve(options.centralHostname, options.centralPort);
-    if (!addresses) {
-        std::cerr << "Error: resolving central hostname failed: "
-                  << ninttp::SocketError{addresses.error()}.what() << '\n';
+int run(const Options &options, std::stop_token stop, StatusObserver observer) {
+    Status snapshot;
+    const auto publish = [&] {
+        if (observer)
+            observer(snapshot);
+    };
+    const auto stopped = [&] {
+        snapshot.phase = Phase::Stopped;
+        publish();
+        return 0;
+    };
+    const auto failed = [&](std::string reason) {
+        if (stop.stop_requested())
+            return stopped();
+        std::cerr << "Error: " << reason << '\n';
+        snapshot.phase = Phase::Failed;
+        snapshot.lastError = std::move(reason);
+        publish();
         return 1;
+    };
+    if (stop.stop_requested())
+        return stopped();
+    publish();
+    const auto addresses = ninttp::dns::resolve(options.centralHostname, options.centralPort);
+    if (stop.stop_requested())
+        return stopped();
+    if (!addresses) {
+        return failed("resolving central hostname failed: " +
+                      std::string(ninttp::SocketError{addresses.error()}.what()));
     }
     printAddresses(*addresses);
     if (addresses->ipv4.empty()) {
-        std::cerr << "Error: central hostname resolved to no IPv4 endpoints\n";
-        return 1;
+        return failed("central hostname resolved to no IPv4 endpoints");
     }
     const auto centralEndpoint = addresses->ipv4.front();
-    if (!registerAndActivate(centralEndpoint, options.wsId, options.location, options.napTimeout))
-        return 1;
+    snapshot.centralEndpoint = centralEndpoint;
+    snapshot.phase = Phase::Registering;
+    publish();
+    if (stop.stop_requested())
+        return stopped();
+    if (auto result = registerAndActivate(centralEndpoint, options.wsId, options.location,
+                                          options.napTimeout, stop); !result)
+        return failed(result.error());
+    if (stop.stop_requested())
+        return stopped();
 
+    snapshot.phase = Phase::Monitoring;
+    publish();
     nap::Reporter reporter(centralEndpoint, options.wsId, options.napInterval, options.napTimeout);
-    while (true) {
+    std::mutex mutex;
+    std::condition_variable_any wake;
+    while (!stop.stop_requested()) {
         std::string failure;
         try {
-            failure = session(options.engineEndpoint, options.wsId, options.hcpTimeout, reporter);
+            failure = session(options.engineEndpoint, options.wsId, options.hcpTimeout, reporter,
+                              stop, snapshot, observer);
         } catch (const ninttp::SocketError &error) {
             failure = error.what();
         }
+        if (stop.stop_requested())
+            break;
         std::osyncstream(std::cerr) << "[Engine][HCP] ws=" << options.wsId
                                    << " session failed: " << failure << '\n';
         reporter.update(false, failure);
-        std::this_thread::sleep_for(options.hcpRetry);
+        snapshot.phase = Phase::Retrying;
+        snapshot.health = Health::Unknown;
+        snapshot.lastError = failure;
+        publish();
+        std::unique_lock lock(mutex);
+        wake.wait_for(lock, stop, options.hcpRetry, [] { return false; });
     }
+    return stopped();
 }
 
 } // namespace app

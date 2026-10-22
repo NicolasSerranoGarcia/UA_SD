@@ -18,3 +18,7 @@ target_link_libraries(monitor_connect_test PRIVATE
   GTest::gtest_main Boost::headers ninttp::ninttp Threads::Threads
 )
 gtest_discover_tests(monitor_connect_test PROPERTIES TIMEOUT 10)
+
+add_executable(monitor_app_test app_test.cpp)
+target_link_libraries(monitor_app_test PRIVATE wm_ws_monitor GTest::gtest_main Boost::headers)
+gtest_discover_tests(monitor_app_test PROPERTIES TIMEOUT 10)
