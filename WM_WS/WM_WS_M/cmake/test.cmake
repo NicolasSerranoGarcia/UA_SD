@@ -1,20 +1,7 @@
 include_guard(DIRECTORY)
 
 include(CTest)
-find_package(GTest CONFIG QUIET)
-if(NOT GTest_FOUND)
-  include(FetchContent)
-  if(MSVC)
-    set(gtest_force_shared_crt ON CACHE BOOL "Use the shared MSVC runtime" FORCE)
-  endif()
-  set(BUILD_GMOCK OFF CACHE BOOL "Build GoogleMock" FORCE)
-  FetchContent_Declare(
-    googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG 6910c9d9165801d8827d628cb72eb7ea9dd538c5 # v1.16.0
-  )
-  FetchContent_MakeAvailable(googletest)
-endif()
+include("${CMAKE_CURRENT_LIST_DIR}/../../shared/cmake/googletest.cmake")
 include(GoogleTest)
 
 add_executable(monitor_options_test tests/options_test.cpp src/app/options.cpp)

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.21)
 
 project(watering_station_engine)
 
@@ -19,7 +19,7 @@ target_include_directories(WM_WS_E PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../share
 
 #librdkafka++ dependency
 target_compile_features(WM_WS_E PRIVATE cxx_std_23)
-target_link_libraries(WM_WS_E PRIVATE PkgConfig::RDKAFKA)
+target_link_libraries(WM_WS_E PRIVATE wm_ws_kafka)
 
 target_link_libraries(WM_WS_E PRIVATE Boost::program_options ninttp::ninttp)
 
