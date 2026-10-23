@@ -16,7 +16,7 @@ This protocol is used to authenticate the watering stations with central. The sp
 ## Kafka
 This section explains the structure and distribution of the topics created in Kafka.
 
-<img width="968" height="1150" alt="image" src="https://github.com/user-attachments/assets/956865be-6f4a-47e7-9947-cff054771baf" />
+<img width="968" height="1337" alt="image" src="https://github.com/user-attachments/assets/a2bd0de2-5221-404b-885e-39c6e64f1935" />
 
 
 
