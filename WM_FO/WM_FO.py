@@ -6,6 +6,7 @@ import json
 from confluent_kafka import Consumer, Producer, KafkaException
 
 FORMAT = 'utf-8'
+DEFAULT_DURATION = 120
 
 def print_menu():
     
@@ -20,6 +21,26 @@ def flush_cmd():
     
     command = "clear" if os.name != "nt" else "cls"
     subprocess.run(command, shell=True)
+
+def ask_int(cmd_msg: str, error_msg: str, default: int | None = None) -> int | None:
+    """Function that asks for an int in the terminal and returns the int if the input is correct, None
+    if the input is 'q' to exit. This is done until the input is correct"""
+    
+    while True:
+        
+        introduced_value = input(cmd_msg).strip()
+        
+        if introduced_value.lower() == "q":
+            return None
+        
+        if not introduced_value and default is not None:
+            return default
+        
+        if introduced_value.isdigit():
+            return int(introduced_value)
+        
+        print(error_msg)
+    
 
 def read_file(file_path: str) -> list:
 
@@ -50,21 +71,25 @@ def read_file(file_path: str) -> list:
                 
     except OSError:
         
-        print(f"File '{file_path}' does not exists. Try again")
+        print(f"[ERROR] File '{file_path}' does not exists. Try again")
         return None
                   
             
     return commands
  
  
-def send_command(producer: Producer, station_id: int, type: str, duration: int = 120):
+def send_command(producer: Producer, station_id: int, type: str, duration: int = DEFAULT_DURATION):
+    
+    if producer is None:
+        print("[ERROR] Kafka connection failed. Command omitted.")
+        return
     
     msg = {"operator_id": operator_id, 
            "station_id": station_id, 
            "command_type": type,
            "duration": duration}
     
-    producer.produce(topic="FO-Req", value=json.dumps(msg).encode(FORMAT))
+    producer.produce(topic="fo-req", value=json.dumps(msg).encode(FORMAT))
     producer.flush()   
     
 def main():
@@ -80,8 +105,7 @@ def main():
     global operator_id; operator_id = args.ID
     
     kafka_config = {
-    "bootstrap.servers": f"{args.kafka_ip}:{args.kafka_port}",
-
+        "bootstrap.servers": f"{args.kafka_ip}:{args.kafka_port}",
         "log_cb": lambda *args: None,  
         "error_cb": lambda err: None, 
         "log_level": 0,
@@ -95,49 +119,91 @@ def main():
 
     except KafkaException as e:
         
+        print(e)
         producer = None
       
-    print_menu()
-    try:    
-        input_option = int(input("Select an option: "))
+    try:
         
-        while input_option != 6:
+        while True:
+            
+            print_menu()
+            input_option = input("Select an option: ").strip()
+            
+            if input_option == '6':
+                
+                print("\nExiting application. Come back soon.")
+                break
             
             match input_option:
                 
-                case 1:
+                # START IRRIGATION
+                case '1':
                     
-                    station_id = input("Select station to irrigate (q to exit): ")
+                    station_id = ask_int(
+                        cmd_msg="Select station to start the irrigation ('q' to cancel): ",
+                        error_msg="[ERROR] Please introduce a correct station ID"
+                    )
+
+                    if station_id is None:
+
+                        time.sleep(1)
+                        flush_cmd()
+                        continue
                     
-                    if station_id != 'q':
+                    duration = ask_int(
+                        cmd_msg=f"Specify duration ('q' to cancel / empty for default ({DEFAULT_DURATION}s)): ",
+                        error_msg="[ERROR] Please specify a correct duration",
+                        default=DEFAULT_DURATION
+                    )
+                    
+                    if duration is None:
                         
-                        duration = input("Specify duration of the irrigation (q to exit / empty for default (120s)): ")
+                        time.sleep(1)
+                        flush_cmd()
+                        continue
+    
+                    send_command(producer=producer, station_id=station_id, type="IRRIGATION", duration=duration)
+
+                
+                # ACTIVATE A STATION    
+                case '2':
+                    
+                    station_id = ask_int(
+                        cmd_msg="Select station to block ('q' to cancel): ",
+                        error_msg="[ERROR] Please introduce a correct station ID"
+                    )
+                    
+                    if station_id is None:
                         
-                        if duration != 'q':
-                            
-                            duration = int(duration) if duration else 120
-                            send_command(producer=producer, station_id=int(station_id), type="IRRIGATION", duration=duration)
-                    
-                case 2:
-                    
-                    station_id = input("Select station to block (q to exit): ")
-                    
-                    if station_id != 'q':
+                        time.sleep(1)
+                        flush_cmd()
+                        continue
                         
-                        send_command(producer=producer, station_id=int(station_id), type="BLOCK")
+                    send_command(producer=producer, station_id=station_id, type="BLOCK")  
+                
+                # BLOCK A STATION      
+                case '3':
                     
-                case 3  :
+                    station_id = ask_int(
+                        cmd_msg="Select station to activate ('q' to cancel): ",
+                        error_msg="[ERROR] Please introduce a correct station ID"
+                    )
                     
-                    station_id = input("Select station to activate (q to exit): ")
-                    
-                    if station_id != 'q':
+                    if station_id is None:
                         
-                        send_command(producer=producer, station_id=int(station_id), type="ACTIVATE")
-                    
-                case 4:
+                        time.sleep(1)
+                        flush_cmd()
+                        continue
+                        
+                    send_command(producer=producer, station_id=station_id, type="ACTIVATE")  
+                
+                # SHOW ALL THE STATIONS   
+                case '4':
                     print("Showing stations...")
                     
-                case 5:
+                
+                # READ COMMANDS FROM A FILE 
+                case '5':
                     
                     while True:
                         
@@ -145,6 +211,8 @@ def main():
                         
                         if file_path == 'q':
                             
+                            time.sleep(1)
+                            flush_cmd()
                             break
                         
                         commands = read_file(file_path=file_path)
@@ -153,7 +221,7 @@ def main():
                             
                             for command in commands:
                                 
-                                if type(command) == tuple:
+                                if isinstance(command, tuple):
                                     
                                     send_command(producer=producer, station_id=command[0], duration=command[1], type="IRRIGATION")
                                     
@@ -164,18 +232,17 @@ def main():
                                 time.sleep(4)
                                     
                             break
-
+                
+                # INCORRECT OPTION
                 case _:
-                    print("Invalid option")
-            
-            print_menu()
-            input_option = int(input("Select an option: "))
+                    print("[ERROR]: Invalid option. Please select a correct option.")
+                    time.sleep(1)
+                    flush_cmd()
     
     except KeyboardInterrupt:
         print("\nInterrupted. Exiting...")
         exit(1)
     
-    print("\nExiting the aplication. Come back soon.")
     exit(0)
 
 if __name__ == "__main__":
