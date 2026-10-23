@@ -49,3 +49,9 @@ This topic is used by the central unit to send operational commands, such as loc
 | `Producer` | `Consumer` |
 |---|---|
 | Central | Watering Station |
+
+### WS-start-conf
+This topic is the one that stations use to send confirmation/authorization to start irrigation to the central unit. This means that, through this topic, central will receive both the response to start irrigation, and the station's own irrigation self start.
+| `Producer` | `Consumer` |
+|---|---|
+| Watering Station | Central |
