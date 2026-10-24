@@ -1,30 +1,11 @@
 import argparse
 import time
 import os
-import json
 from confluent_kafka import Consumer, Producer, KafkaException
 from modules.utils import *
+from modules.kafka_clients import *
 
-FORMAT = 'utf-8'
 DEFAULT_DURATION = 120
-
-def send_command(producer: Producer, station_id: int | None, type: str, duration: int):
-    
-    if producer is None:
-        print("[ERROR] Producer is not created. Command omitted.")
-        return
-    
-    msg = {"operator_id": operator_id, 
-           "station_id": station_id, 
-           "command_type": type,
-           "duration": duration}
-    try: 
-        producer.produce(topic="fo-req", value=json.dumps(msg).encode(FORMAT))
-        producer.flush()
-        
-    except Exception as e:
-        
-        print(f"[ERROR] Failed to send message to Kafka: {e}")
     
 def main():
     
@@ -36,13 +17,10 @@ def main():
     
     args = argparser.parse_args()
 
-    global operator_id; operator_id = args.ID
+    operator_id = args.ID
     
     kafka_config = {
         "bootstrap.servers": f"{args.kafka_ip}:{args.kafka_port}",
-        "log_cb": lambda *args: None,  
-        "error_cb": lambda err: None, 
-        "log_level": 0,
         "socket.timeout.ms": 2000,
         "message.timeout.ms": 3000,
     }   
@@ -50,10 +28,17 @@ def main():
     try:
         
         producer = Producer(kafka_config)
+        
+        stop_event = threading.Event()
+        start_consumers(
+            bootstrap_servers=f"{args.kafka_ip}:{args.kafka_port}",
+            operator_id=operator_id,
+            stop_event=stop_event
+        )
 
     except KafkaException as e:
         
-        print(e)
+        print(f"[KAFKA ERROR] Error creating producer: {e}")
         producer = None
       
     try:
@@ -96,7 +81,7 @@ def main():
                         flush_cmd()
                         continue
     
-                    send_command(producer=producer, station_id=station_id, type="IRRIGATION", duration=duration)
+                    send_command(producer=producer, operator_id=operator_id, station_id=station_id, type="IRRIGATION", duration=duration)
 
                 
                 # BLOCK A STATION    
@@ -113,7 +98,7 @@ def main():
                         flush_cmd()
                         continue
                         
-                    send_command(producer=producer, station_id=station_id, type="BLOCK")  
+                    send_command(producer=producer, operator_id=operator_id, station_id=station_id, type="BLOCK")  
                 
                 # ACTIVATE A STATION      
                 case '3':
@@ -129,12 +114,12 @@ def main():
                         flush_cmd()
                         continue
                         
-                    send_command(producer=producer, station_id=station_id, type="ACTIVATE")  
+                    send_command(producer=producer, operator_id=operator_id, station_id=station_id, type="ACTIVATE")  
                 
                 # SHOW ALL THE STATIONS   
                 case '4':
                     
-                    send_command(producer=producer, station_id=None, type="REQUEST-STATIONS")
+                    send_command(producer=producer, operator_id=operator_id, station_id=None, type="GET-STATIONS")
                     
                 
                 # READ COMMANDS FROM A FILE 
@@ -159,11 +144,11 @@ def main():
                                 
                                 if isinstance(command, tuple):
                                     
-                                    send_command(producer=producer, station_id=command[0], duration=command[1], type="IRRIGATION")
+                                    send_command(producer=producer, operator_id=operator_id,station_id=command[0], type="IRRIGATION", duration=command[1])
                                     
                                 else:
                                     
-                                    send_command(producer=producer, station_id=command, duration=DEFAULT_DURATION, type="IRRIGATION")
+                                    send_command(producer=producer, operator_id=operator_id,station_id=command, type="IRRIGATION", duration=DEFAULT_DURATION)
                                     
                                 time.sleep(4)
                                     
@@ -178,6 +163,10 @@ def main():
     except KeyboardInterrupt:
         print("\nInterrupted. Exiting...")
         exit(1)
+        
+    finally:
+        
+        stop_event.set()
     
     exit(0)
 
