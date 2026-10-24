@@ -1,10 +1,19 @@
 import json
+import queue
 import threading
 from confluent_kafka import Consumer, Producer, KafkaException, KafkaError
 
 FORMAT = "utf-8"
 
-def send_command(producer: Producer, operator_id: int, station_id: int | None, type: str, duration: int):
+cent_notif_queue = queue.Queue() # Queue for the broadcast messages
+response_queue = queue.Queue() # Queue for the unicast response messages
+telemetry_queue = queue.Queue() # Queue for the telemetry
+
+##########################
+### PRODUCER FUNCTIONS ###
+##########################
+
+def send_command(producer: Producer, operator_id: int, station_id: int | None, type: str, duration: int | None = None):
     
     if producer is None:
         print("[ERROR] Producer is not created. Command omitted.")
@@ -22,36 +31,48 @@ def send_command(producer: Producer, operator_id: int, station_id: int | None, t
         
         print(f"[ERROR] Failed to send message to Kafka: {e}")
 
+
+##########################
+### CONSUMER FUNCTIONS ###
+##########################
+
+
 def start_consumers(bootstrap_servers: str, operator_id: int, stop_event: threading.Event):
+    """Function that starts two consumers in different threads, each one listening to a different kafka topic"""
     
     # Thread for 'central-notis' topic
     thread_notifications = threading.Thread(
-        target=generic_kafka_consumer,
-        args=(bootstrap_servers, f"group-notis-{operator_id}", "central-notis", stop_event),
+        target=_generic_kafka_consumer,
+        args=(bootstrap_servers, operator_id, "central-notis", stop_event),
         daemon=True
     )
     
     # Thread for 'telemetry' topic
     thread_telemetry = threading.Thread(
-        target=generic_kafka_consumer,
-        args=(bootstrap_servers, f"group-notis-{operator_id}", "telemetry", stop_event),
+        target=_generic_kafka_consumer,
+        args=(bootstrap_servers, operator_id, "telemetry", stop_event),
         daemon=True
     )
     
     thread_notifications.start()
     thread_telemetry.start()    
 
-def generic_kafka_consumer(bootstrap_servers: str, group_id: str, topic: str, stop_event: threading.Event):
+def _generic_kafka_consumer(bootstrap_servers: str, operator_id: int, topic: str, stop_event: threading.Event):
+    """Function that creates a generic consumer"""
     
     config = {
         "bootstrap.servers": bootstrap_servers,
-        "group.id": group_id,
+        "group.id": f"group-notis-{operator_id}",
         "auto.offset.reset": "latest",
     }
-    
-    consumer = Consumer(config)
-    
-    consumer.subscribe([topic])
+    try:
+        
+        consumer = Consumer(config)
+        consumer.subscribe([topic])
+        
+    except Exception as e:
+        
+        print("[KAFKA ERROR] Failed creating consumer")
     
     # While FO has not exited the main program
     while not stop_event.is_set():
@@ -71,26 +92,30 @@ def generic_kafka_consumer(bootstrap_servers: str, group_id: str, topic: str, st
         
         try:
             
-            data = json.loads(msg.value().decode(FORMAT))
+            data: dict = json.loads(msg.value().decode(FORMAT))
             
             if topic == "central-notis":
                 
-                process_notification_message(data)
+                target_fo = data.get("operator_id")
+                
+                if target_fo == operator_id: # Unicast message
+                    
+                    response_queue.put(data)
+                    
+                elif target_fo is None: # Broadcast message
+                    
+                    cent_notif_queue.put(data)
+                    
+                else:
+                    
+                    continue
                 
             elif topic == "telemetry":
                 
-                process_telemetry_message(data)
+                telemetry_queue.put(data)
         
         except Exception as e:
             
             print(f"[ERROR PARSING MESSAGE] Consumer of topic {topic}: {e}")
         
     consumer.close()
-    
-def process_notification_message(data: dict):
-    
-    pass
-
-def process_telemetry_message(data: dict):
-    
-    pass
