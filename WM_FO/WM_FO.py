@@ -1,29 +1,14 @@
 import argparse
 import time
-import os
-import subprocess
-from confluent_kafka import Consumer, Producer
+import queue
+from confluent_kafka import Consumer, Producer, KafkaException
+from modules.utils import *
+from modules.kafka_clients import *
 
-def print_menu():
-    
-    print("1.Start Irrigation")
-    print("2.Block station")
-    print("3.Activate station")
-    print("4.Show stations")
-    print("5.Read requests from file")
-    print("6.Exit")
+DEFAULT_DURATION = 120
 
-def flush_cmd():
-    
-    command = "clear" if os.name != "nt" else "cls"
-    subprocess.run(command, shell=True)
-
-def read_file(file_path: str):
-
-    return
-    
 def main():
-
+    
     argparser = argparse.ArgumentParser(description="Field Operator for Water Management Network")
     
     argparser.add_argument("ID", type=int, help="Unique ID of the field operator")
@@ -32,49 +17,232 @@ def main():
     
     args = argparser.parse_args()
 
-    operator_id = args.ID
-    kafka_ip = args.kafka_ip
-    kafka_port = args.kafka_port
+    global operator_id; operator_id = args.ID
     
-      
-    print_menu()
-    try:    
-        input_option = int(input("Select an option: "))
+    kafka_config = {
+        "bootstrap.servers": f"{args.kafka_ip}:{args.kafka_port}",
+        "socket.timeout.ms": 2000,
+        "message.timeout.ms": 3000,
+    }   
+    
+    try:
         
-        while input_option != 6:
+        producer = Producer(kafka_config)
+        
+        stop_event = threading.Event()
+        start_consumers(
+            bootstrap_servers=f"{args.kafka_ip}:{args.kafka_port}",
+            operator_id=operator_id,
+            stop_event=stop_event
+        )
+
+    except KafkaException as e:
+        
+        print(f"[KAFKA ERROR] Error creating producer: {e}")
+        producer = None
+      
+    try:
+        
+        while True:
+            
+            print_menu()
+            input_option = input("Select an option: ").strip()
+            
+            if input_option == '6':
+                
+                print("\nExiting application. Come back soon.")
+                break
             
             match input_option:
                 
-                case 1:
-                    print("Starting irrigation...")
+                # START IRRIGATION
+                case '1':
                     
-                case 2:
-                    print("Blocking station...")
+                    station_id = ask_int(
+                        cmd_msg="Select station to start the irrigation ('q' to cancel): ",
+                        error_msg="[ERROR] Please introduce a correct station ID"
+                    )
+
+                    if station_id is None:
+
+                        time.sleep(1)
+                        flush_cmd()
+                        continue
                     
-                case 3  :
-                    print("Activating station...")
+                    duration = ask_int(
+                        cmd_msg=f"Specify duration ('q' to cancel / empty for default ({DEFAULT_DURATION}s)): ",
+                        error_msg="[ERROR] Please specify a correct duration",
+                        default=DEFAULT_DURATION
+                    )
                     
-                case 4:
-                    print("Showing stations...")
+                    if duration is None:
+                        
+                        time.sleep(1)
+                        flush_cmd()
+                        continue
+    
+                    send_command(producer=producer, operator_id=operator_id, station_id=station_id, type="IRRIGATION", duration=duration)
                     
-                case 5:
                     
-                    file_path = input("Enter the path of the file: ")
-                    read_file(file_path)
+
+                
+                # BLOCK A STATION    
+                case '2':
                     
+                    station_id = ask_int(
+                        cmd_msg="Select station to block ('q' to cancel): ",
+                        error_msg="[ERROR] Please introduce a correct station ID"
+                    )
+                    
+                    if station_id is None:
+                        
+                        time.sleep(1)
+                        flush_cmd()
+                        continue
+                        
+                    send_command(producer=producer, operator_id=operator_id, station_id=station_id, type="BLOCK")
+                    print("Waiting for the central to respond...")
+                    
+                    time_out = 5.0
+                    start_time = time.time()
+                    response_found = False
+                    
+                    while time.time() - start_time < time_out:
+                        
+                        try:
+                        
+                            response: dict = response_queue.get(timeout=0.5)
+                            
+                            if response.get("station_id") == station_id and response.get("type") == "BLOCK":
+                                
+                                response_found = True
+                                print("Message recieved from central: ", endl="")
+                                
+                                if response.get("result") == "OK":
+                                    print(f"Station {station_id} blocked successfully")
+                                    
+                                elif response.get("result") == "KO":
+                                    print(f"Failed blocking station {station_id}. Reason: {response.get("error_code")}")
+                                    
+                                break
+                        
+                        except queue.Empty:
+                            
+                            continue
+                        
+                    if not response_found:
+                        
+                        print("[CENTRAL ERROR] Timeout reached: central did not send a respond in time")
+                        
+                    time.sleep(2)
+                    flush_cmd()
+                        
+                
+                # ACTIVATE A STATION      
+                case '3':
+                    
+                    station_id = ask_int(
+                        cmd_msg="Select station to activate ('q' to cancel): ",
+                        error_msg="[ERROR] Please introduce a correct station ID"
+                    )
+                    
+                    if station_id is None:
+                        
+                        time.sleep(1)
+                        flush_cmd()
+                        continue
+                        
+                    send_command(producer=producer, operator_id=operator_id, station_id=station_id, type="ACTIVATE")  
+                    print("Waiting for the central to respond...")
+                    
+                    time_out = 5.0
+                    start_time = time.time()
+                    response_found = False
+                    
+                    while time.time() - start_time < time_out:
+                        
+                        try:
+                        
+                            response: dict = response_queue.get(timeout=0.5)
+                            
+                            if response.get("station_id") == station_id and response.get("type") == "ACTIVATE":
+                                
+                                response_found = True
+                                print("Message recieved from central: ", endl="")
+                                
+                                if response.get("result") == "OK":
+                                    print(f"Station {station_id} activated successfully")
+                                    
+                                elif response.get("result") == "KO":
+                                    print(f"Failed activating station {station_id}. Reason: {response.get("error_code")}")
+                                    
+                                break
+                        
+                        except queue.Empty:
+                            
+                            continue
+                        
+                    if not response_found:
+                        
+                        print("[CENTRAL ERROR] Timeout reached: central did not send a respond in time")
+                        
+                    time.sleep(2)
+                    flush_cmd()
+
+  
+                # SHOW ALL THE STATIONS   
+                case '4':
+                    
+                    send_command(producer=producer, operator_id=operator_id, station_id=None, type="GET-STATIONS")
+                    
+                
+                # READ COMMANDS FROM A FILE 
+                case '5':
+                    
+                    while True:
+                        
+                        file_path = input("Enter the path of the file ('q' to cancel): ").strip()
+                        
+                        if file_path == 'q':
+                            
+                            time.sleep(1)
+                            flush_cmd()
+                            break
+                        
+                        commands = read_file(file_path=file_path)
+                        print(commands)
+                        
+                        if commands is not None:
+                            
+                            for command in commands:
+                                
+                                if isinstance(command, tuple):
+                                    
+                                    send_command(producer=producer, operator_id=operator_id,station_id=command[0], type="IRRIGATION", duration=command[1])
+                                    
+                                else:
+                                    
+                                    send_command(producer=producer, operator_id=operator_id,station_id=command, type="IRRIGATION", duration=DEFAULT_DURATION)
+                                    
+                                time.sleep(4)
+                                    
+                            break
+                
+                # INCORRECT OPTION
                 case _:
-                    print("Invalid option")
-            
-            time.sleep(2)
-            flush_cmd()
-            
-            print_menu()
-            input_option = int(input("Select an option: "))
+                    print("[ERROR]: Invalid option. Please select a correct option.")
+                    time.sleep(1)
+                    flush_cmd()
     
     except KeyboardInterrupt:
-        print("\nInterrupted.Exiting...")
-        exit(0)
+        print("\nInterrupted. Exiting...")
+        exit(1)
+        
+    finally:
+        
+        stop_event.set()
     
+    exit(0)
 
 if __name__ == "__main__":
     main()
