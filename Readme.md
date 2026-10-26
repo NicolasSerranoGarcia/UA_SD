@@ -25,33 +25,39 @@ This topic is used for all the data that the engine sends to the central regardi
 | `Producer` | `Consumers` |
 |---|---|
 | Watering station | Central, Field Operators |
+<br>
 
 ### FO-Req
-This topic is the one the operators use to send irrigation requests to the central
+This topic is the one the operators use to send operation commands to the central — such as start an irrigation, block an station or activate an station.
 | `Producer` | `Consumer` |
 |---|---|
 | Field Operator | Central |
+<br>
 
 ### Central-notis
-This topis is used by the central to send notifications to the field operators, such as irrigation summaries or station status updates
+This topis is used by the central to send notifications to the field operators, such as operation confirmations or station status updates
 | `Producer` | `Consumer` |
 |---|---|
 | Central | Field Operator |
+<br>
 
 ### WS-finish-conf
-This topic is the one the stations use to send confirmation of the completion of irrigation to the central unit. 
+This topic is used by the stations to send confirmation to the central unit that irrigation has finished. The message will also contain a summary of the irrigation data.
 | `Producer` | `Consumer` |
 |---|---|
 | Watering Station | Central |
+<br>
 
 ### Central-ops
-This topic is used by the central unit to send operational commands, such as locking a station or starting irrigation for a station, provided that the station is available.
+This topic is used by the central unit to send operational commands, such as locking a station or starting irrigation for a station, provided that the station is available. This commands can be sent the central unit or by a field operator via central.
 | `Producer` | `Consumer` |
 |---|---|
 | Central | Watering Station |
+<br>
 
 ### WS-start-conf
-This topic is the one that stations use to send confirmation/authorization to start irrigation to the central unit. This means that, through this topic, central will receive both the response to start irrigation, and the station's own irrigation self start.
+This topic is used by the stations to send confirmation or rejection of each operation previously sent by the central unit. This means that, via this topic, the station will confirm to the central unit all operations received — whether they were initiated by the central unit itself or by a field operator.
 | `Producer` | `Consumer` |
 |---|---|
 | Watering Station | Central |
+<br>
