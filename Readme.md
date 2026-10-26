@@ -35,7 +35,7 @@ This topic is the one the operators use to send operation commands to the centra
 <br>
 
 ### Central-notis
-This topis is used by the central to send notifications to the field operators, such as operation confirmations or station status updates
+This topic is used by the central to send notifications to the field operators, such as operation confirmations or station status updates
 | `Producer` | `Consumer` |
 |---|---|
 | Central | Field Operator |
