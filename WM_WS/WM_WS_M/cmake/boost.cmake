@@ -1,3 +1,3 @@
 include_guard(DIRECTORY)
 
-find_package(Boost REQUIRED COMPONENTS program_options)
+include("${CMAKE_CURRENT_LIST_DIR}/../../shared/cmake/boost.cmake")

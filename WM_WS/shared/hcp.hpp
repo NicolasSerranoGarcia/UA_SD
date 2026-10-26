@@ -1,12 +1,14 @@
 #pragma once
 
 #include <algorithm>
+#include <cerrno>
 #include <cstddef>
 #include <span>
 #include <expected>
 #include <optional>
 #include <chrono>
 #include <thread>
+#include <ninttp/platform_traits.hpp>
 #include <ninttp/socket/error/socket_error.hpp>
 #include <string>
 #include <string_view>
@@ -72,6 +74,13 @@ std::expected<void, IoError> connectWithin(Socket& socket, const Endpoint& endpo
     while (std::chrono::steady_clock::now() < deadline) {
         auto result = socket.connect(endpoint);
         if (result) return {};
+        // A pending nonblocking connection may finish between connect calls.
+#if NINTTP_PLATFORM_WINDOWS == 1
+        const bool alreadyConnected = result.error().errorCode() == WSAEISCONN;
+#else
+        const bool alreadyConnected = result.error().errorCode() == EISCONN;
+#endif
+        if (lastError && alreadyConnected) return {};
         const auto category = result.error().category();
         if (category != ninttp::SocketErrorCategory::Blocks &&
             category != ninttp::SocketErrorCategory::Interrupted)

@@ -67,7 +67,7 @@ Tcp::socket connect(boost::asio::io_context &context, std::uint16_t port) {
 
 Process::Process(const std::filesystem::path &executable, const std::vector<std::string> &arguments,
                  bool captureOutput)
-    : child_(context_, executable, arguments,
+    : child_(context_, executable.native(), arguments,
              processStdio(input_, outputPipe_, errorPipe_, captureOutput)) {
     if (captureOutput) {
         boost::asio::async_read(outputPipe_, boost::asio::dynamic_buffer(output_), [](auto, auto) {});
