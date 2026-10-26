@@ -13,4 +13,7 @@ ARG BUILD_TESTING=OFF
 RUN cmake -B build -S . -DBUILD_TESTING=${BUILD_TESTING} \
     && cmake --build build/
 
-CMD ["./build/WM_WS_E"]
+ARG QUEUE_ENDPOINT=iriguchi.proxy.rlwy.net:37040
+ENV QUEUE_ENDPOINT=${QUEUE_ENDPOINT}
+
+CMD ["sh", "-c", "exec ./build/WM_WS_E --queue \"$QUEUE_ENDPOINT\""]
