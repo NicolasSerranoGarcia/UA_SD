@@ -4,6 +4,7 @@
 #include "engine/engine.hpp"
 #include "poll/poll.hpp"
 #include <chrono>
+#include <cstdlib>
 #include <exception>
 #include <expected>
 #include <iostream>
@@ -61,6 +62,11 @@ void readConsole(std::stop_token stop, Engine &engine) {
                 std::osyncstream(std::cout) << "[Engine][Console] repair completed; health=OK"
                                            << std::endl;
                 break;
+            case 'q':
+            case 'Q':
+                std::osyncstream(std::cout) << "[Engine][Console] 'Q' pressed; exiting..."
+                    << std::endl;
+                std::exit(EXIT_SUCCESS);
             default:
                 break;
             }
