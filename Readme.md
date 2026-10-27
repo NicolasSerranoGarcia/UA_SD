@@ -92,6 +92,9 @@ The JSON structure used in this topic is the following:
 
 - `"RESPONSE"` → Used for responses or command confirmations. (`"summary"` is ignored.)
 - `"SUMMARY"` → Used for summary data. (`"stations"` is ignored.)
+
+`"summary"` → tuple with the form (`<station_id>`, `<total_time>`,`<total_liters>`)
+
 ---
 <br>
 
