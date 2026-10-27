@@ -4,6 +4,7 @@ project(watering_station_engine)
 
 include(CmakeOptions.txt)
 
+set(WM_WS_BOOST_COMPONENTS program_options url json)
 include(cmake/boost.cmake)
 include(cmake/kafka.cmake)
 include(cmake/ninttp.cmake)

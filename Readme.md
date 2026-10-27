@@ -151,8 +151,13 @@ This topic is used by the stations to send confirmation or rejection of each ope
 The JSON structure used in this topic is the following:
 ```json
 {
-  "operation_code": "<integer: ID of the confirmed or rejected operation>",
+  "station_id": "<integer: ID of the station sending the confirmation>",
+  "operation_code": "<integer|null: ID of the confirmed or rejected operation; optional for station-initiated irrigation>",
   "status": "<string: OK or KO>",
   "reason": "<string|null: Reason for the KO response>"
 }
 ```
+
+For station-initiated irrigation, `operation_code` may be omitted or `null`;
+Central assigns the operation code internally. Confirmations of operations sent
+by Central must include the original integer `operation_code`.

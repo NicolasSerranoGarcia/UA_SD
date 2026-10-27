@@ -1,5 +1,8 @@
 add_subdirectory(engine)
 
+add_library(wm_ws_station kafka/station.cpp kafka/journal.cpp)
+target_link_libraries(wm_ws_station PUBLIC engine_core Boost::json ninttp::ninttp)
+
 add_library(wm_ws_engine
   app/app.cpp
   app/options.cpp
