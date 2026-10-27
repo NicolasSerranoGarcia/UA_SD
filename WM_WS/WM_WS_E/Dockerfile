@@ -2,7 +2,7 @@ FROM gcc:14
 
 WORKDIR /usr/src/water_management_app/watering_station/engine
 
-RUN apt-get update && apt-get install -y --no-install-recommends librdkafka-dev cmake git ca-certificates pkg-config libboost-program-options-dev libboost-url-dev\
+RUN apt-get update && apt-get install -y --no-install-recommends librdkafka-dev cmake git ca-certificates pkg-config libboost-program-options-dev libboost-url-dev libboost-json-dev\
     && rm -rf /var/lib/apt/lists/*
 
 # Build with WM_WS as the context so the shared HCP header is available.
@@ -16,4 +16,8 @@ RUN cmake -B build -S . -DBUILD_TESTING=${BUILD_TESTING} \
 ARG QUEUE_ENDPOINT=iriguchi.proxy.rlwy.net:37040
 ENV QUEUE_ENDPOINT=${QUEUE_ENDPOINT}
 
-CMD ["sh", "-c", "exec ./build/WM_WS_E --queue \"$QUEUE_ENDPOINT\""]
+ARG STATE_FILE=/var/lib/wm-ws/state.jsonl
+ENV STATE_FILE=${STATE_FILE}
+RUN mkdir -p /var/lib/wm-ws
+
+CMD ["sh", "-c", "exec ./build/WM_WS_E --queue \"$QUEUE_ENDPOINT\" --state-file \"$STATE_FILE\""]
