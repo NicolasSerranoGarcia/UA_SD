@@ -8,9 +8,15 @@ endforeach()
 
 add_executable(poll_test poll_test.cpp)
 target_compile_features(poll_test PRIVATE cxx_std_23)
-target_include_directories(poll_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+target_include_directories(poll_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../shared")
 target_link_libraries(poll_test PRIVATE GTest::gtest_main ninttp::ninttp)
 gtest_discover_tests(poll_test PROPERTIES TIMEOUT 10)
+
+add_executable(terminal_support_test terminal_support_test.cpp)
+target_compile_features(terminal_support_test PRIVATE cxx_std_23)
+target_include_directories(terminal_support_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../shared")
+target_link_libraries(terminal_support_test PRIVATE GTest::gtest_main ninttp::ninttp)
+gtest_discover_tests(terminal_support_test PROPERTIES TIMEOUT 10)
 
 add_executable(kafka_station_test kafka_station_test.cpp)
 target_link_libraries(kafka_station_test PRIVATE wm_ws_station GTest::gtest_main)
