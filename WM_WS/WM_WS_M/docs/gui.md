@@ -3,8 +3,9 @@
 Configure Monitor with `-DBUILD_GUI=ON` to build the Qt6 panel. The default
 `-DBUILD_GUI=OFF` runs the terminal app. Both builds share `src/WM_WS_M.cpp` as
 their entry point; CMake defines `BUILD_GUI` as `1` or `0` for that executable
-to select `gui::run` or `app::run`. Both builds take the
-same command-line options and retain stdout/stderr logging. On Windows the
+to select `gui::run` or `app::runTerminal`. Both builds take the
+same command-line options and save diagnostics to `log/wm-ws-monitor.log`
+(override with `--log-file`). Fatal errors also appear on the terminal. On Windows the
 executable keeps the console subsystem (`WIN32_EXECUTABLE OFF`), including
 when the Qt window is enabled.
 
@@ -18,7 +19,7 @@ cmake --build WM_WS/WM_WS_M/build/gui
 `app::run` accepts an optional stop token and `StatusObserver`. Observers run
 on the calling thread and receive snapshots of startup, resolved Central,
 Engine health, health response time, and the latest startup or Engine error.
-Central status-reporting diagnostics remain in the terminal. Terminal logging
+Central status-reporting diagnostics are saved to the activity log. File logging
 does not depend on an observer.
 
 `wm_ws_monitor_gui` is the Qt adapter. Its `gui::Window` displays snapshots;

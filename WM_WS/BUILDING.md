@@ -44,6 +44,30 @@ On Windows, add `.exe` to executable paths; multi-configuration generators may
 also place executables in a configuration directory such as `Debug`.
 The engine's optional `BUILD_EXAMPLES` CMake option defaults to `OFF`.
 
+### Terminal menus, logs, and recovery data
+
+Both terminal applications show their status and all available menu options.
+Choose a letter or number and press Enter. Engine supports `start`, `stop`,
+`fault`, `repair`, `status`, `help`, and `quit`; Monitor supports `status`,
+`help`, and `quit`. Closing stdin leaves the services running. Quitting Monitor
+disconnects it from Engine; Engine then stops watering and waits for activation.
+
+Routine diagnostics are saved to files instead of the terminal. Serious errors
+remain visible on screen with technical details and a suggested next step.
+Native runs use these paths relative to the current working directory:
+
+| Data | Default path |
+| ---- | ------------ |
+| Engine activity log | `log/wm-ws-engine.log` |
+| Monitor activity log | `log/wm-ws-monitor.log` |
+| Engine recovery data | `state/wm-ws-state.jsonl.0` and `state/wm-ws-state.jsonl.1` |
+
+Directories are created automatically. Logs append across restarts and include
+UTC timestamps. Override the paths with `--log-file` and Engine's `--state-file`.
+Use separate recovery paths for independent stations. When upgrading an existing
+native deployment, move both old `wm-ws-state.jsonl.*` files into `state/` while
+Engine is stopped, or pass the old base path explicitly with `--state-file`.
+
 The CMake dependency modules look for installed packages first. Missing
 libraries are fetched at pinned versions under the build directory: Boost
 1.89.0, librdkafka 2.11.1 (Engine only), ninttp at the pinned commit, and
@@ -92,6 +116,68 @@ the development packages for the desired display backend. See the
 Deploy Qt shared libraries and platform plugins when distributing the GUI build.
 
 ## Docker
+
+Deploy a complete watering station (Engine and Monitor) with Docker Compose v2.17+
+or newer. From the repository root:
+
+```sh
+docker compose -f WM_WS/compose.yaml -p ws-1 up --build -d
+docker compose -f WM_WS/compose.yaml -p ws-1 logs -f
+```
+
+Compose builds both existing Dockerfiles with `WM_WS` as their context and starts
+Engine before Monitor. Both services join the project's default bridge network;
+Monitor resolves `engine` to an IPv4 address at startup, because its executable
+currently accepts only numeric IPv4 addresses. No host ports or fixed container IPs
+are needed. Monitor's existing connection retries handle Engine startup. Compose
+updates/restarts of Engine also restart Monitor so it resolves the address again.
+See Docker's [Compose networking](https://docs.docker.com/compose/how-tos/networking/)
+and [startup order](https://docs.docker.com/compose/how-tos/startup-order/) documentation.
+
+The project has its own `engine-state` and `station-logs` volumes, retained by
+`down`. Both applications keep interactive input open. Attach in separate
+terminals, detach with `Ctrl+P` then
+`Ctrl+Q`, stop/recover Monitor, and shut down the complete deployment with:
+
+```sh
+docker compose -f WM_WS/compose.yaml -p ws-1 attach engine
+
+docker compose -f WM_WS/compose.yaml -p ws-1 attach monitor
+docker compose -f WM_WS/compose.yaml -p ws-1 stop monitor
+docker compose -f WM_WS/compose.yaml -p ws-1 start monitor
+docker compose -f WM_WS/compose.yaml -p ws-1 down
+```
+
+Docker keeps recovery data at `/var/lib/wm-ws/state.jsonl.0` and `.1`, preserving
+the existing state-volume layout. Logs are saved to
+`/var/log/wm-ws/wm-ws-engine.log` and `/var/log/wm-ws/wm-ws-monitor.log`.
+`docker compose logs` shows terminal menus and fatal errors. To follow the
+activity logs, run these in separate terminals:
+
+```sh
+docker compose -f WM_WS/compose.yaml -p ws-1 exec engine tail -f /var/log/wm-ws/wm-ws-engine.log
+docker compose -f WM_WS/compose.yaml -p ws-1 exec monitor tail -f /var/log/wm-ws/wm-ws-monitor.log
+```
+
+Compose accepts `WS_ID`, `QUEUE_ENDPOINT`, `CENTRAL_HOSTNAME`, and `CENTRAL_PORT`
+from the shell or an explicit `--env-file`. Their defaults match the Dockerfiles.
+For another independent station, use a different ID and project name; this also
+separates its network and recovery volume. In Bash:
+
+```sh
+WS_ID=2 docker compose -f WM_WS/compose.yaml -p ws-2 up --build -d
+```
+
+In PowerShell:
+
+```powershell
+$env:WS_ID = '2'
+docker compose -f WM_WS/compose.yaml -p ws-2 up --build -d
+Remove-Item Env:WS_ID
+```
+
+The following sections retain individual image and container commands for debugging
+the modules separately.
 
 Build from the `WM_WS` context so shared headers and CMake modules are copied:
 
@@ -203,13 +289,14 @@ all timeout, interval, and retry values must be positive milliseconds.
 
 ### Engine: WM_WS_E
 
-| Parameter | CLI default | Purpose |
-| --- | --- | --- |
-| `--help` | â€” | Print available options and exit. |
-| `--queue HOST:PORT` | Required | Kafka bootstrap endpoint; must be nonempty. |
-| `--hcp-port PORT` | `8080` | Local TCP port for monitor health connections, listening on all IPv4 interfaces. |
-| `--hcp-timeout-ms MS` | `2000` | HCP receive/send deadline. |
-| `--state-file PATH` | `wm-ws-state.jsonl` | Base path for two synced checkpoint files (`.0` and `.1`); use a separate path per station. |
+| Parameter               | CLI default           | Purpose                                                                                         |
+| ----------------------- | --------------------- | ----------------------------------------------------------------------------------------------- |
+| `--help`              | â€”                | Print available options and exit.                                                               |
+| `--queue HOST:PORT`   | Required              | Kafka bootstrap endpoint; must be nonempty.                                                     |
+| `--hcp-port PORT`     | `8080`              | Local TCP port for monitor health connections, listening on all IPv4 interfaces.                |
+| `--hcp-timeout-ms MS` | `2000`              | HCP receive/send deadline.                                                                      |
+| `--state-file PATH`   | `state/wm-ws-state.jsonl` | Base path for two synced checkpoint files (`.0` and `.1`); use a separate path per station. |
+| `--log-file PATH`     | `log/wm-ws-engine.log` | Append activity logs here; create parent directories as needed. |
 
 Copy-and-paste example with every operational parameter:
 
@@ -222,19 +309,20 @@ only one engine. The monitor must target this container's IP to test it.
 
 ### Monitor: WM_WS_M
 
-| Parameter | CLI default | Purpose |
-| --- | --- | --- |
-| `--help` | â€” | Print available options and exit. |
-| `--ws-id ID` | Required | Station ID: 1â€“64 letters, digits, hyphens, or underscores. |
-| `--engine-ip IPV4` | Required | Engine address in dotted-decimal IPv4 format. Hostnames are not supported. |
-| `--engine-port PORT` | `8080` | Engine HCP listening port. |
-| `--hcp-timeout-ms MS` | `2000` | HCP connect/send/response deadline. |
-| `--hcp-retry-ms MS` | `1000` | Delay between engine connection attempts. |
-| `--nap-interval-ms MS` | `1000` | Interval for healthy reports and retries of unacknowledged fault reports. |
-| `--nap-timeout-ms MS` | `2000` | NAP connect/send/response deadline. |
-| `--central-hostname HOST` | Required | Nonempty Central hostname; resolved to IPv4. |
-| `--central-port PORT` | Required | Central NAP TCP port. |
-| `--monitor-location LOCATION` | `spain` | Registration location; nonempty and must not contain `#`. |
+| Parameter                       | CLI default | Purpose                                                                    |
+| ------------------------------- | ----------- | -------------------------------------------------------------------------- |
+| `--help`                      | â€”      | Print available options and exit.                                          |
+| `--ws-id ID`                  | Required    | Station ID: 1â€“64 letters, digits, hyphens, or underscores.            |
+| `--engine-ip IPV4`            | Required    | Engine address in dotted-decimal IPv4 format. Hostnames are not supported. |
+| `--engine-port PORT`          | `8080`    | Engine HCP listening port.                                                 |
+| `--hcp-timeout-ms MS`         | `2000`    | HCP connect/send/response deadline.                                        |
+| `--hcp-retry-ms MS`           | `1000`    | Delay between engine connection attempts.                                  |
+| `--nap-interval-ms MS`        | `1000`    | Interval for healthy reports and retries of unacknowledged fault reports.  |
+| `--nap-timeout-ms MS`         | `2000`    | NAP connect/send/response deadline.                                        |
+| `--central-hostname HOST`     | Required    | Nonempty Central hostname; resolved to IPv4.                               |
+| `--central-port PORT`         | Required    | Central NAP TCP port.                                                      |
+| `--monitor-location LOCATION` | `spain`   | Registration location; nonempty and must not contain `#`.                |
+| `--log-file PATH`             | `log/wm-ws-monitor.log` | Append activity logs here; create parent directories as needed. |
 
 To run with every operational parameter, stop the existing monitor first. This
 example reuses the engine started in the bridge network section:
@@ -262,15 +350,17 @@ Each connection parameter below is both a build argument (`--build-arg`) and an
 environment variable (`docker run -e`). A build argument changes the image's
 default; a runtime environment variable overrides that default for one container.
 
-| Image | Parameter | Default | Executable argument |
-| --- | --- | --- | --- |
-| `wm-engine` | `QUEUE_ENDPOINT` | `iriguchi.proxy.rlwy.net:37040` | `--queue` |
-| `wm-engine` | `STATE_FILE` | `/var/lib/wm-ws/state.jsonl` | `--state-file` |
-| `wm-monitor` | `WS_ID` | `1` | `--ws-id` |
-| `wm-monitor` | `ENGINE_IP` | `127.0.0.1` | `--engine-ip` |
-| `wm-monitor` | `ENGINE_PORT` | `8080` | `--engine-port` |
-| `wm-monitor` | `CENTRAL_HOSTNAME` | `altaria.proxy.rlwy.net` | `--central-hostname` |
-| `wm-monitor` | `CENTRAL_PORT` | `40931` | `--central-port` |
+| Image          | Parameter            | Default                           | Executable argument    |
+| -------------- | -------------------- | --------------------------------- | ---------------------- |
+| `wm-engine`  | `QUEUE_ENDPOINT`   | `iriguchi.proxy.rlwy.net:37040` | `--queue`            |
+| `wm-engine`  | `STATE_FILE`       | `/var/lib/wm-ws/state.jsonl`    | `--state-file`       |
+| `wm-engine`  | `LOG_FILE`         | `/var/log/wm-ws/wm-ws-engine.log` | `--log-file`      |
+| `wm-monitor` | `LOG_FILE`         | `/var/log/wm-ws/wm-ws-monitor.log` | `--log-file`     |
+| `wm-monitor` | `WS_ID`            | `1`                             | `--ws-id`            |
+| `wm-monitor` | `ENGINE_IP`        | `127.0.0.1`                     | `--engine-ip`        |
+| `wm-monitor` | `ENGINE_PORT`      | `8080`                          | `--engine-port`      |
+| `wm-monitor` | `CENTRAL_HOSTNAME` | `altaria.proxy.rlwy.net`        | `--central-hostname` |
+| `wm-monitor` | `CENTRAL_PORT`     | `40931`                         | `--central-port`     |
 
 The remaining CLI options have no Docker environment-variable mapping. To change
 them, use an explicit executable command as shown above.
@@ -312,10 +402,10 @@ docker build -f WM_WS/WM_WS_M/Dockerfile --build-arg WS_ID=2 --build-arg CENTRAL
 
 Build-only Docker arguments:
 
-| Image | Argument | Default | Purpose |
-| --- | --- | --- | --- |
-| Both | `BUILD_TESTING` | `OFF` | Build unit tests. |
-| Monitor | `BUILD_GUI` | `OFF` | Build the Qt6 GUI instead of the terminal frontend. |
+| Image   | Argument          | Default | Purpose                                             |
+| ------- | ----------------- | ------- | --------------------------------------------------- |
+| Both    | `BUILD_TESTING` | `OFF` | Build unit tests.                                   |
+| Monitor | `BUILD_GUI`     | `OFF` | Build the Qt6 GUI instead of the terminal frontend. |
 
 Use `BUILD_GUI=OFF` for these Docker terminal examples. GUI builds use the same
 CLI options but need a graphical display; see [the GUI guide](WM_WS_M/docs/gui.md).
@@ -331,7 +421,6 @@ docker run --rm wm-engine_tests ctest --test-dir build --output-on-failure
 docker build -f WM_WS/WM_WS_M/Dockerfile --build-arg BUILD_TESTING=ON --build-arg BUILD_GUI=OFF -t wm-monitor_tests WM_WS
 docker run --rm wm-monitor_tests ctest --test-dir build --output-on-failure
 ```
-
 
 ## Process integration tests
 
