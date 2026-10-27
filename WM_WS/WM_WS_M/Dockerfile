@@ -19,10 +19,13 @@ ARG ENGINE_IP=127.0.0.1
 ARG ENGINE_PORT=8080
 ARG CENTRAL_HOSTNAME=altaria.proxy.rlwy.net
 ARG CENTRAL_PORT=40931
+ARG LOG_FILE=/var/log/wm-ws/wm-ws-monitor.log
 ENV WS_ID=${WS_ID} \
     ENGINE_IP=${ENGINE_IP} \
     ENGINE_PORT=${ENGINE_PORT} \
     CENTRAL_HOSTNAME=${CENTRAL_HOSTNAME} \
-    CENTRAL_PORT=${CENTRAL_PORT}
+    CENTRAL_PORT=${CENTRAL_PORT} \
+    LOG_FILE=${LOG_FILE}
+RUN mkdir -p /var/log/wm-ws
 
-CMD ["sh", "-c", "exec ./build/WM_WS_M --ws-id \"$WS_ID\" --engine-ip \"$ENGINE_IP\" --engine-port \"$ENGINE_PORT\" --central-hostname \"$CENTRAL_HOSTNAME\" --central-port \"$CENTRAL_PORT\""]
+CMD ["sh", "-c", "exec ./build/WM_WS_M --ws-id \"$WS_ID\" --engine-ip \"$ENGINE_IP\" --engine-port \"$ENGINE_PORT\" --central-hostname \"$CENTRAL_HOSTNAME\" --central-port \"$CENTRAL_PORT\" --log-file \"$LOG_FILE\""]

@@ -18,6 +18,8 @@ ENV QUEUE_ENDPOINT=${QUEUE_ENDPOINT}
 
 ARG STATE_FILE=/var/lib/wm-ws/state.jsonl
 ENV STATE_FILE=${STATE_FILE}
-RUN mkdir -p /var/lib/wm-ws
+ARG LOG_FILE=/var/log/wm-ws/wm-ws-engine.log
+ENV LOG_FILE=${LOG_FILE}
+RUN mkdir -p /var/lib/wm-ws /var/log/wm-ws
 
-CMD ["sh", "-c", "exec ./build/WM_WS_E --queue \"$QUEUE_ENDPOINT\" --state-file \"$STATE_FILE\""]
+CMD ["sh", "-c", "exec ./build/WM_WS_E --queue \"$QUEUE_ENDPOINT\" --state-file \"$STATE_FILE\" --log-file \"$LOG_FILE\""]

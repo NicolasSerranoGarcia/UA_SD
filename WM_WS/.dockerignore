@@ -5,3 +5,7 @@
 **/*.o
 **/*.a
 **/__pycache__/
+**/log/
+**/state/
+**/wm-ws-*.log
+**/wm-ws-state.jsonl.*

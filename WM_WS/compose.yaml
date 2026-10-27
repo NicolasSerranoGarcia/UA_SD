@@ -1,0 +1,45 @@
+services:
+  engine:
+    build:
+      context: .
+      dockerfile: WM_WS_E/Dockerfile
+    environment:
+      QUEUE_ENDPOINT: "${QUEUE_ENDPOINT:-iriguchi.proxy.rlwy.net:37040}"
+      STATE_FILE: /var/lib/wm-ws/state.jsonl
+      LOG_FILE: /var/log/wm-ws/wm-ws-engine.log
+    volumes:
+      - engine-state:/var/lib/wm-ws
+      - station-logs:/var/log/wm-ws
+    stdin_open: true
+    tty: true
+
+  monitor:
+    build:
+      context: .
+      dockerfile: WM_WS_M/Dockerfile
+    depends_on:
+      engine:
+        condition: service_started
+        restart: true
+    environment:
+      WS_ID: "${WS_ID:-1}"
+      ENGINE_PORT: "8080"
+      CENTRAL_HOSTNAME: "${CENTRAL_HOSTNAME:-altaria.proxy.rlwy.net}"
+      CENTRAL_PORT: "${CENTRAL_PORT:-40931}"
+      LOG_FILE: /var/log/wm-ws/wm-ws-monitor.log
+    volumes:
+      - station-logs:/var/log/wm-ws
+    stdin_open: true
+    tty: true
+    # Monitor accepts numeric IPv4 addresses; resolve Compose's service name at startup.
+    command:
+      - sh
+      - -ec
+      - |
+        ENGINE_IP=$$(getent ahostsv4 engine | awk 'NR == 1 { print $$1 }')
+        test -n "$$ENGINE_IP"
+        exec ./build/WM_WS_M --ws-id "$$WS_ID" --engine-ip "$$ENGINE_IP" --engine-port "$$ENGINE_PORT" --central-hostname "$$CENTRAL_HOSTNAME" --central-port "$$CENTRAL_PORT" --log-file "$$LOG_FILE"
+
+volumes:
+  engine-state:
+  station-logs:
