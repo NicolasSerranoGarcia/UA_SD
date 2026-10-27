@@ -80,6 +80,8 @@ The JSON structure used in this topic is the following:
   "operator_id": "<integer: ID of the operator the message is addressed to>",
   "type": "<string: Message type>",
   "operation_code": "<integer|null: ID of the confirmed or rejected operation; null if the message is not a response>",
+  "status": "<string: OK if the operation was successfull, KO if not>",
+  "reason": "<string: Reason for KO response>"
   "stations": "<array|null: List of requested stations (only for GET-STATIONS)>",
   "summary": "<tuple|null: Summary data for an irrigation session>"
 }
