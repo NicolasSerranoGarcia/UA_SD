@@ -21,6 +21,10 @@ class Engine {
         InvalidFlow,
         /// Central has blocked irrigation. No additional payload.
         BlockedByCentral,
+        /// Monitor is disconnected. No additional payload.
+        MonitorDisconnected,
+        /// External activation is required. No additional payload.
+        NotActivated,
         /// Irrigation is already running. No additional payload.
         AlreadyWatering,
         /// Irrigation was already stopped. No additional payload
@@ -47,6 +51,25 @@ class Engine {
 
     [[nodiscard]] std::string wsId() const;
 
+    /// Losing Monitor stops irrigation and revokes permission to start or publish.
+    void setMonitorConnected(bool connected);
+
+    [[nodiscard]] bool isActivated() const;
+
+    [[nodiscard]] bool canPublish() const;
+
+    struct Reading {
+        double flowLitersPerMinute;
+        double volumeLiters;
+        double elapsedSeconds;
+    };
+
+    /// Final totals remain readable after stopping, disconnecting, or detecting a leak.
+    [[nodiscard]] Reading reading() const;
+
+    /// NAP/HCP activation cannot remove a deliberate Central block.
+    [[nodiscard]] std::expected<void, Error> activateFromMonitor();
+
     struct Config {
         seconds irrigationTimeoutLimit = 4000;
     };
@@ -65,6 +88,10 @@ class Engine {
     /// Input validation precedes permission/activity checks. Success means the
     /// requested valve operation succeeded and the engine entered Watering.
     [[nodiscard]] std::expected<void, Error> start(internal::units::liters_min startFlux = 40);
+
+    /// A null duration is indefinite irrigation, as specified by Central-ops.
+    [[nodiscard]] std::expected<void, Error> start(
+        internal::units::liters_min startFlux, std::optional<std::chrono::seconds> duration);
 
     [[nodiscard]] std::chrono::seconds timeToShutdown() const;
 
@@ -86,15 +113,25 @@ class Engine {
 
     [[nodiscard]] bool isHealthy() const;
 
+    /// Report a pending leak at least once, even if repaired between HCP polls.
+    [[nodiscard]] bool checkHealth();
+
     [[nodiscard]] internal::units::liters_min measureFlow() const;
 
   private:
     // Caller must hold mutex_.
     void injectFaultUnlocked();
+    void stopWateringUnlocked();
+    [[nodiscard]] Reading readingUnlocked() const;
 
     enum class State { Idle, Watering, Fault };
 
     bool blockedByServer = false;
+    bool monitorConnected_ = false;
+    bool activated_ = false;
+    bool monitorAuthorized_ = false;
+    bool faultPending_ = false;
+    bool recoveryRequired_ = false;
 
     internal::Valve valve;
     Config config;
@@ -102,6 +139,8 @@ class Engine {
 
     mutable std::mutex mutex_;
     std::chrono::steady_clock::time_point deadline{};
+    std::chrono::steady_clock::time_point started_{};
+    Reading finalReading_{};
     State state = State::Idle;
 
     struct Registry;

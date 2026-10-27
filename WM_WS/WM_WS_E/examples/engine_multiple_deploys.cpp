@@ -10,6 +10,11 @@ using namespace std::literals;
 int main(){
     Engine engine;
     Engine engine1;
+
+    for (auto *station : {&engine, &engine1}) {
+        station->setMonitorConnected(true);
+        if (!station->activateFromMonitor()) return 1;
+    }
     
     if (!engine.start()) return 1;
     std::this_thread::sleep_for(2s);

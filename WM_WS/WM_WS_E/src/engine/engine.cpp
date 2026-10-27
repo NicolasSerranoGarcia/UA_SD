@@ -5,6 +5,7 @@
 #include "engine/valid_flow.hpp"
 
 #include <cassert>
+#include <algorithm>
 #include <exception>
 #include <list>
 #include <stop_token>
@@ -26,8 +27,7 @@ struct Engine::Registry {
                 std::lock_guard engineLock(engine->mutex_);
                 if (engine->state == State::Watering &&
                     std::chrono::steady_clock::now() >= engine->deadline) {
-                    engine->valve.close();
-                    engine->state = State::Idle;
+                    engine->stopWateringUnlocked();
                 }
                 try {
                     if (internal::LeakDetector::hasLeak(engine->valve))
@@ -56,6 +56,40 @@ std::string Engine::wsId() const {
     return wsId_;
 }
 
+void Engine::setMonitorConnected(bool connected) {
+    std::lock_guard lock(mutex_);
+    monitorConnected_ = connected;
+    if (!connected) {
+        activated_ = false;
+        monitorAuthorized_ = false;
+        stopWateringUnlocked();
+    }
+}
+
+bool Engine::isActivated() const {
+    std::lock_guard lock(mutex_);
+    return activated_;
+}
+
+bool Engine::canPublish() const {
+    std::lock_guard lock(mutex_);
+    return monitorConnected_ && monitorAuthorized_;
+}
+
+std::expected<void, Engine::Error> Engine::activateFromMonitor() {
+    std::lock_guard lock(mutex_);
+    if (!monitorConnected_)
+        return std::unexpected(Error{ErrorType::MonitorDisconnected});
+    if (state == State::Fault || faultPending_)
+        return std::unexpected(Error{ErrorType::Fault});
+    monitorAuthorized_ = true;
+    recoveryRequired_ = false;
+    if (blockedByServer)
+        return std::unexpected(Error{ErrorType::BlockedByCentral});
+    activated_ = true;
+    return {};
+}
+
 Engine::Engine() : Engine(Config{}) {}
 
 Engine::Engine(Config config) : config(config) {
@@ -70,7 +104,8 @@ Engine::~Engine() {
     entries.engines.remove(this);
 }
 
-std::expected<void, Engine::Error> Engine::start(internal::units::liters_min startFlux) {
+std::expected<void, Engine::Error> Engine::start(internal::units::liters_min startFlux,
+                                               std::optional<std::chrono::seconds> duration) {
     std::lock_guard lock(mutex_);
     if (!internal::validFlow(startFlux, valve.maxFlux)) {
         return std::unexpected(Error::invalidFlowRequest(startFlux));
@@ -82,6 +117,12 @@ std::expected<void, Engine::Error> Engine::start(internal::units::liters_min sta
     if (state == State::Fault) {
         return std::unexpected(Error{ErrorType::Fault});
     }
+    if (!monitorConnected_) {
+        return std::unexpected(Error{ErrorType::MonitorDisconnected});
+    }
+    if (!activated_) {
+        return std::unexpected(Error{ErrorType::NotActivated});
+    }
     if (state == State::Watering) {
         return std::unexpected(Error{ErrorType::AlreadyWatering});
     }
@@ -92,10 +133,15 @@ std::expected<void, Engine::Error> Engine::start(internal::units::liters_min sta
     [[maybe_unused]] const auto result = valve.openBy(startFlux);
     assert(result);
 
-    deadline =
-        std::chrono::steady_clock::now() + std::chrono::seconds{config.irrigationTimeoutLimit};
+    started_ = std::chrono::steady_clock::now();
+    deadline = duration ? started_ + *duration : std::chrono::steady_clock::time_point::max();
+    finalReading_ = {};
     state = State::Watering;
     return {};
+}
+
+std::expected<void, Engine::Error> Engine::start(internal::units::liters_min startFlux) {
+    return start(startFlux, std::chrono::seconds{config.irrigationTimeoutLimit});
 }
 
 std::chrono::seconds Engine::timeToShutdown() const {
@@ -117,24 +163,28 @@ std::expected<void, Engine::Error> Engine::stop() {
     if (state == State::Idle) {
         return std::unexpected(Error{ErrorType::AlreadyStopped});
     }
-    valve.close();
-    if (state == State::Watering)
-        state = State::Idle;
+    stopWateringUnlocked();
     return {};
 }
 
 std::expected<void, Engine::Error> Engine::block(server_token /*token*/) {
     std::lock_guard lock(mutex_);
     blockedByServer = true;
-    valve.close();
-    if (state == State::Watering)
-        state = State::Idle;
+    activated_ = false;
+    stopWateringUnlocked();
     return {};
 }
 
 std::expected<void, Engine::Error> Engine::unblock(server_token /*token*/) {
     std::lock_guard lock(mutex_);
+    if (!monitorConnected_)
+        return std::unexpected(Error{ErrorType::MonitorDisconnected});
+    if (state == State::Fault)
+        return std::unexpected(Error{ErrorType::Fault});
+    if (!monitorAuthorized_ || recoveryRequired_)
+        return std::unexpected(Error{ErrorType::NotActivated});
     blockedByServer = false;
+    activated_ = true;
     return {};
 }
 
@@ -154,12 +204,46 @@ bool Engine::isHealthy() const {
     return state != State::Fault;
 }
 
+bool Engine::checkHealth() {
+    std::lock_guard lock(mutex_);
+    const bool healthy = state != State::Fault && !faultPending_;
+    faultPending_ = false;
+    return healthy;
+}
+
 internal::units::liters_min Engine::measureFlow() const {
     std::lock_guard lock(mutex_);
     return internal::FlowMeter::measure(valve);
 }
 
 void Engine::injectFaultUnlocked() {
+    stopWateringUnlocked();
     state = State::Fault;
+    faultPending_ = true;
+    activated_ = false;
+    recoveryRequired_ = true;
+    valve.close();
+}
+
+Engine::Reading Engine::readingUnlocked() const {
+    if (state != State::Watering)
+        return finalReading_;
+    const double elapsed = std::chrono::duration<double>(
+        std::min(std::chrono::steady_clock::now(), deadline) - started_).count();
+    const double flow = internal::FlowMeter::measure(valve);
+    return {flow, flow * std::max(0.0, elapsed) / 60.0, std::max(0.0, elapsed)};
+}
+
+Engine::Reading Engine::reading() const {
+    std::lock_guard lock(mutex_);
+    return readingUnlocked();
+}
+
+void Engine::stopWateringUnlocked() {
+    if (state == State::Watering) {
+        finalReading_ = readingUnlocked();
+        finalReading_.flowLitersPerMinute = 0;
+        state = State::Idle;
+    }
     valve.close();
 }
