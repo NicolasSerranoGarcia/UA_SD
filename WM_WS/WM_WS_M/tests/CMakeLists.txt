@@ -23,6 +23,10 @@ add_executable(monitor_app_test app_test.cpp)
 target_link_libraries(monitor_app_test PRIVATE wm_ws_monitor GTest::gtest_main Boost::headers)
 gtest_discover_tests(monitor_app_test PROPERTIES TIMEOUT 10)
 
+add_executable(monitor_reporter_test reporter_test.cpp)
+target_link_libraries(monitor_reporter_test PRIVATE wm_ws_monitor GTest::gtest_main Boost::headers)
+gtest_discover_tests(monitor_reporter_test PROPERTIES TIMEOUT 10)
+
 if(BUILD_GUI)
   add_executable(monitor_window_test window_test.cpp)
   target_link_libraries(monitor_window_test PRIVATE wm_ws_monitor_gui GTest::gtest)

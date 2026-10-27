@@ -9,8 +9,17 @@
 namespace {
 namespace ts = testSupport;
 
+void acknowledgeNap(ts::Tcp::socket &socket, unsigned int request) {
+    const std::string body = "NAP#1.0#" + std::to_string(request) + "#3#station-1";
+    unsigned char checksum = 0;
+    for (unsigned char byte : body)
+        checksum ^= byte;
+    constexpr char hex[] = "0123456789ABCDEF";
+    ts::send(socket, body + '#' + hex[checksum >> 4] + hex[checksum & 15] + "#FIN");
+}
+
 TEST(Process, EngineBindFailureExitsWithOpenStdin) {
-    ts::Server occupied;
+    ts::Server occupied(true);
     ts::Process engine(ts::enginePath, {"--queue", "127.0.0.1:9092", "--hcp-port",
                                         std::to_string(occupied.port())});
     const auto code = engine.waitFor(std::chrono::seconds{3});
@@ -48,8 +57,43 @@ TEST(Process, EngineAcceptsNewSessionAfterInvalidRequest) {
     ts::send(engine.socket(), "XX");
     EXPECT_EQ(ts::receive(engine.socket(), 1), "");
     auto retry = engine.reconnect();
-    ts::send(retry, "ID station-2\nHC");
+    ts::send(retry, "ID station-1\nHC");
     EXPECT_EQ(ts::receive(retry, 4), "OKOK");
+}
+
+TEST(Process, EngineRejectsIdentityChangeUntilRestart) {
+    ts::Engine engine;
+    ts::send(engine.socket(), "ID station-1\n");
+    ASSERT_EQ(ts::receive(engine.socket(), 2), "OK");
+    engine.socket().close();
+    auto other = engine.reconnect();
+    ts::send(other, "ID station-2\n");
+    EXPECT_EQ(ts::receive(other, 2), "KO");
+}
+
+TEST(Process, HcpActivationRejectsLeakAndSucceedsAfterRepair) {
+    ts::Engine engine;
+    ts::send(engine.socket(), "ID station-1\nHCAC");
+    ASSERT_EQ(ts::receive(engine.socket(), 6), "OKOKOK");
+    engine.process().sendInput("F\n");
+    const auto limit = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+    for (;;) {
+        ts::send(engine.socket(), "HC");
+        if (ts::receive(engine.socket(), 2) == "KO")
+            break;
+        ASSERT_LT(std::chrono::steady_clock::now(), limit);
+    }
+    ts::send(engine.socket(), "AC");
+    EXPECT_EQ(ts::receive(engine.socket(), 2), "KO");
+    engine.process().sendInput("R\n");
+    for (;;) {
+        ts::send(engine.socket(), "HC");
+        if (ts::receive(engine.socket(), 2) == "OK")
+            break;
+        ASSERT_LT(std::chrono::steady_clock::now(), limit);
+    }
+    ts::send(engine.socket(), "AC");
+    EXPECT_EQ(ts::receive(engine.socket(), 2), "OK");
 }
 
 class RegistrationResponse : public testing::TestWithParam<const char *> {};
@@ -69,24 +113,61 @@ TEST_P(RegistrationResponse, MonitorActivatesOnNewConnectionAndReportsEngineHeal
         ASSERT_EQ(ts::receiveFrame(activation), "NAP#1.0#1#1#station-1#16#FIN");
         ts::send(activation, "NAP#1.0#1#3#station-1#14#FIN");
     }
-    {
-        auto status = central.accept();
-        ASSERT_EQ(ts::receiveFrame(status), "NAP#1.0#1#2#station-1#OK#32#FIN");
-        ts::send(status, "NAP#1.0#1#3#station-1#14#FIN");
-    }
+    auto status = central.accept();
+    ASSERT_EQ(ts::receiveFrame(status), "NAP#1.0#1#2#station-1#OK#32#FIN");
+    acknowledgeNap(status, 1);
     engine.process().stop();
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{4};
+    unsigned int request = 2;
     while (std::chrono::steady_clock::now() < deadline) {
-        auto status = central.accept();
         const auto frame = ts::receiveFrame(status);
-        ASSERT_TRUE(frame == "NAP#1.0#1#2#station-1#OK#32#FIN" ||
-                    frame == "NAP#1.0#1#2#station-1#KO#32#FIN")
-            << frame;
-        ts::send(status, "NAP#1.0#1#3#station-1#14#FIN");
-        if (frame == "NAP#1.0#1#2#station-1#KO#32#FIN")
+        ASSERT_TRUE(frame.starts_with("NAP#1.0#" + std::to_string(request) + "#2#station-1#")) << frame;
+        acknowledgeNap(status, request++);
+        if (frame.find("#KO#") != std::string::npos)
             return;
     }
     FAIL() << "Monitor did not report the engine disconnection";
+}
+
+TEST(Process, LeakClosesNapAndRepairRequiresNewActivation) {
+    ts::Engine engine;
+    engine.socket().close();
+    ts::Server central;
+    ts::Process monitor(ts::monitorPath, ts::monitorArguments(central.port(), engine.port()));
+    {
+        auto registration = central.accept();
+        ASSERT_EQ(ts::receiveFrame(registration), "NAP#1.0#1#0#station-1#spain#51#FIN");
+        acknowledgeNap(registration, 1);
+    }
+    {
+        auto activation = central.accept();
+        ASSERT_EQ(ts::receiveFrame(activation), "NAP#1.0#1#1#station-1#16#FIN");
+        acknowledgeNap(activation, 1);
+    }
+    auto status = central.accept();
+    ASSERT_EQ(ts::receiveFrame(status), "NAP#1.0#1#2#station-1#OK#32#FIN");
+    acknowledgeNap(status, 1);
+    engine.process().sendInput("F\n");
+    bool reportedFault = false;
+    for (unsigned int request = 2; request < 40; ++request) {
+        const auto frame = ts::receiveFrame(status);
+        acknowledgeNap(status, request);
+        if (frame.find("#KO#") != std::string::npos) {
+            reportedFault = true;
+            break;
+        }
+    }
+    ASSERT_TRUE(reportedFault);
+    EXPECT_EQ(ts::receive(status, 1), "");
+    engine.process().sendInput("R\n");
+    {
+        auto activation = central.accept();
+        EXPECT_EQ(ts::receiveFrame(activation), "NAP#1.0#1#1#station-1#16#FIN");
+        acknowledgeNap(activation, 1);
+    }
+    auto recovered = central.accept();
+    EXPECT_EQ(ts::receiveFrame(recovered), "NAP#1.0#1#2#station-1#OK#32#FIN");
+    acknowledgeNap(recovered, 1);
 }
 
 INSTANTIATE_TEST_SUITE_P(Nap, RegistrationResponse,

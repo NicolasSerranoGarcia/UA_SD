@@ -33,22 +33,58 @@ void Reporter::update(bool healthy, std::string_view reason) {
             nextAttempt_ = std::chrono::steady_clock::now();
         }
         healthy_ = healthy;
+        if (!healthy)
+            activated_ = false;
         reason_ = reason;
     }
     changed_.notify_one();
 }
 
+std::uint64_t Reporter::activationGeneration() const {
+    std::lock_guard lock(mutex_);
+    return activated_ && healthy_.value_or(false) && faultGeneration_ == acknowledgedFault_
+               ? activationGeneration_ : 0;
+}
+
 bool Reporter::send(bool healthy, const std::string &reason) {
-    Connection<ninttp::IPv4Endpoint> conn(timeout_);
-    auto result = conn.open(endpoint_);
+    using CentralConnection = Connection<ninttp::IPv4Endpoint>;
+    if (healthy && needsActivation_) {
+        CentralConnection activation(timeout_);
+        auto result = activation.open(endpoint_);
+        if (result)
+            result = activation.sendActivation(wsId_);
+        if (result) {
+            const auto response = activation.getResponse();
+            if (!response)
+                result = std::unexpected(response.error());
+        }
+        if (!result) {
+            std::osyncstream(std::cerr) << "[Central][NAP] ws=" << wsId_
+                                       << " activation failed: " << result.error().message() << '\n';
+            return false;
+        }
+        needsActivation_ = false;
+        {
+            std::lock_guard lock(mutex_);
+            activated_ = true;
+            ++activationGeneration_;
+        }
+        std::osyncstream(std::cout) << "[Central][NAP] ws=" << wsId_
+                                   << " activation acknowledged" << std::endl;
+    }
+    std::expected<void, CentralConnection::Error> result;
+    if (!connection_) {
+        connection_ = std::make_unique<CentralConnection>(timeout_);
+        result = connection_->open(endpoint_);
+    }
     if (result)
-        result = conn.sendStatus(wsId_, healthy);
+        result = connection_->sendStatus(wsId_, healthy);
     if (!result) {
         std::osyncstream(std::cerr) << "[Central][NAP] ws=" << wsId_
                                    << " status send failed: " << result.error().message() << '\n';
         return false;
     }
-    auto response = conn.getResponse();
+    auto response = connection_->getResponse();
     if (!response) {
         std::osyncstream(std::cerr) << "[Central][NAP] ws=" << wsId_
                                    << " status acknowledgement failed: "
@@ -58,6 +94,10 @@ bool Reporter::send(bool healthy, const std::string &reason) {
     std::osyncstream(std::cout) << "[Central][NAP] ws=" << wsId_
                                << " status acknowledged: state=" << (healthy ? "healthy" : "fault")
                                << " reason=" << reason << std::endl;
+    if (!healthy) {
+        connection_.reset();
+        needsActivation_ = true;
+    }
     return true;
 }
 
@@ -88,7 +128,13 @@ void Reporter::run() {
             std::osyncstream(std::cerr) << "[Central][NAP] ws=" << wsId_
                                        << " reporting failed: " << error.what() << '\n';
         }
+        if (!acknowledged) {
+            connection_.reset();
+            needsActivation_ = true;
+        }
         lock.lock();
+        if (!acknowledged || !healthy)
+            activated_ = false;
         if (acknowledged && !healthy)
             acknowledgedFault_ = generation;
         // Preserve an immediate report requested while this exchange was running.

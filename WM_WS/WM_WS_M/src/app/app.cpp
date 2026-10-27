@@ -43,7 +43,7 @@ void printAddresses(const ninttp::ResolvedAddresses &addresses) {
 }
 
 std::expected<void, std::string>
-registerAndActivate(const ninttp::IPv4Endpoint &centralEndpoint, const std::string &wsId,
+registerStation(const ninttp::IPv4Endpoint &centralEndpoint, const std::string &wsId,
                     std::string_view location, std::chrono::milliseconds timeout,
                     std::stop_token stop) {
     using Connection = nap::Connection<ninttp::IPv4Endpoint>;
@@ -78,25 +78,7 @@ registerAndActivate(const ninttp::IPv4Endpoint &centralEndpoint, const std::stri
                                    << std::endl;
     }
 
-    // Central closes the registration connection after its response.
-    Connection conn(timeout);
-    if (auto opened = conn.open(centralEndpoint); !opened) {
-        return std::unexpected("connecting to central for activation failed. Reason: " + opened.error().message());
-    }
-    if (stop.stop_requested())
-        return {};
-    auto activated = conn.sendActivation(wsId);
-    if (!activated) {
-        return std::unexpected("sending activation failed. Reason: " + activated.error().message());
-    }
-    if (stop.stop_requested())
-        return {};
-    auto activationResponse = conn.getResponse();
-    if (!activationResponse) {
-        return std::unexpected("activation rejected or response failed. Reason: " + activationResponse.error().message());
-    }
-    std::osyncstream(std::cout) << "[Central][NAP] ws=" << wsId << " activation acknowledged"
-                               << std::endl;
+    // Activation follows a healthy Engine response, owned by the NAP reporter.
     return {};
 }
 
@@ -125,6 +107,7 @@ std::string session(const ninttp::IPv4Endpoint &engineEndpoint, const std::strin
 
     std::mutex mutex;
     std::condition_variable_any wake;
+    std::uint64_t activationGeneration = 0;
     while (!stop.stop_requested()) {
         std::unique_lock lock(mutex);
         wake.wait_for(lock, stop, std::chrono::seconds{1}, [] { return false; });
@@ -140,6 +123,21 @@ std::string session(const ninttp::IPv4Endpoint &engineEndpoint, const std::strin
         std::osyncstream(std::cout) << "[Engine][HCP] ws=" << wsId << " health=" << status
                                    << std::endl;
         reporter.update(status == hcp::okMsg, status);
+        const auto acknowledgedActivation = reporter.activationGeneration();
+        if (status == hcp::okMsg && acknowledgedActivation != 0 &&
+            acknowledgedActivation != activationGeneration) {
+            if (auto result = hcp::sendExact(socket, "AC", deadline(timeout)); !result)
+                return "activation send: " + result.error().message();
+            std::array<char, 2> activationResponse{};
+            if (auto result = hcp::receiveExact(socket, activationResponse, deadline(timeout)); !result)
+                return "activation response: " + result.error().message();
+            // A deliberate Central block is healthy but cannot be cleared through HCP.
+            if (std::string_view{activationResponse.data(), activationResponse.size()} != hcp::okMsg &&
+                std::string_view{activationResponse.data(), activationResponse.size()} != hcp::koMsg)
+                return "invalid HCP activation response";
+            if (std::string_view{activationResponse.data(), activationResponse.size()} == hcp::okMsg)
+                activationGeneration = acknowledgedActivation;
+        }
         snapshot.phase = Phase::Monitoring;
         snapshot.health = status == hcp::okMsg ? Health::Ok : Health::Ko;
         snapshot.lastHealth = std::chrono::system_clock::now();
@@ -191,7 +189,7 @@ int run(const Options &options, std::stop_token stop, StatusObserver observer) {
     publish();
     if (stop.stop_requested())
         return stopped();
-    if (auto result = registerAndActivate(centralEndpoint, options.wsId, options.location,
+    if (auto result = registerStation(centralEndpoint, options.wsId, options.location,
                                           options.napTimeout, stop); !result)
         return failed(result.error());
     if (stop.stop_requested())

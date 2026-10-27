@@ -16,20 +16,23 @@ hcp::Deadline deadline(std::chrono::milliseconds timeout) {
     return std::chrono::steady_clock::now() + timeout;
 }
 
-std::expected<void, std::string> respondToHealth(const Engine &engine,
+std::expected<void, std::string> respondToHealth(Engine &engine,
                                                  ninttp::StreamSocket<ninttp::IPv4Endpoint> &socket,
                                                  std::chrono::milliseconds timeout) {
     std::array<char, 2> request{};
     if (const auto result = hcp::receiveExact(socket, request, deadline(timeout)); !result)
         return std::unexpected(result.error().message());
-    if (std::string_view{request.data(), request.size()} != "HC")
+    const std::string_view command{request.data(), request.size()};
+    if (command != "HC" && command != "AC")
         return std::unexpected(std::string{"invalid HCP health request"});
-    const auto status = engine.isHealthy() ? hcp::okMsg : hcp::koMsg;
+    const bool accepted = command == "AC" ? engine.activateFromMonitor().has_value() : engine.checkHealth();
+    const auto status = accepted ? hcp::okMsg : hcp::koMsg;
     if (const auto result = hcp::sendExact(socket, status, deadline(timeout));
         !result)
         return std::unexpected(result.error().message());
     std::osyncstream(std::cout) << "[Monitor][HCP] ws=" << engine.wsId()
-                               << " health response=" << status << std::endl;
+                               << (command == "AC" ? " activation response=" : " health response=")
+                               << status << std::endl;
     return {};
 }
 
@@ -53,6 +56,11 @@ std::expected<void, std::string> serveHealth(Engine &engine, std::uint16_t port,
             return std::unexpected(std::string{"HCP accept: "} + accepted.error().what());
         }
         auto &socket = *accepted;
+        // Every exit path revokes activation, including malformed requests and timeouts.
+        struct MonitorSession {
+            Engine &engine;
+            ~MonitorSession() { engine.setMonitorConnected(false); }
+        } session{engine};
         std::string wsId;
         if (!hcp::receiveId(socket, wsId, deadline(timeout))) {
             (void)hcp::sendExact(socket, hcp::koMsg, deadline(timeout));
@@ -60,7 +68,13 @@ std::expected<void, std::string> serveHealth(Engine &engine, std::uint16_t port,
                 << "[Monitor][HCP] identification rejected: missing, timed out, or invalid WS ID\n";
             continue;
         }
+        if (!engine.wsId().empty() && engine.wsId() != wsId) {
+            (void)hcp::sendExact(socket, hcp::koMsg, deadline(timeout));
+            std::osyncstream(std::cerr) << "[Monitor][HCP] identification rejected: station ID changed\n";
+            continue;
+        }
         engine.setWsId(wsId);
+        engine.setMonitorConnected(true);
         if (const auto result = hcp::sendExact(socket, hcp::okMsg, deadline(timeout)); !result) {
             std::osyncstream(std::cerr) << "[Monitor][HCP] ws=" << wsId
                                        << " identification response failed: "

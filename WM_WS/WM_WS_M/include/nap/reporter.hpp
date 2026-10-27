@@ -1,9 +1,12 @@
 #pragma once
 
+#include "nap/connection.hpp"
+
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
+#include <memory>
 #include <ninttp/endpoints.hpp>
 #include <optional>
 #include <string>
@@ -27,6 +30,9 @@ class Reporter {
 
     void update(bool healthy, std::string_view reason);
 
+    /// Zero until healthy recovery has been activated and every pending fault acknowledged.
+    [[nodiscard]] std::uint64_t activationGeneration() const;
+
   private:
     bool send(bool healthy, const std::string &reason);
 
@@ -36,7 +42,7 @@ class Reporter {
     std::string wsId_;
     std::chrono::milliseconds interval_;
     std::chrono::milliseconds timeout_;
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     std::condition_variable changed_;
     bool stopping_ = false;
     std::optional<bool> healthy_;
@@ -44,6 +50,10 @@ class Reporter {
     std::string faultReason_;
     std::uint64_t faultGeneration_ = 0;
     std::uint64_t acknowledgedFault_ = 0;
+    std::uint64_t activationGeneration_ = 0;
+    bool activated_ = false;
+    bool needsActivation_ = true;
+    std::unique_ptr<Connection<ninttp::IPv4Endpoint>> connection_;
     std::chrono::steady_clock::time_point nextAttempt_{};
     std::thread worker_;
 };

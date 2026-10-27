@@ -49,7 +49,7 @@ class Process {
 
 class Server {
   public:
-    Server();
+    explicit Server(bool wildcard = false);
     std::uint16_t port() const;
     Tcp::socket accept(std::chrono::milliseconds timeout = std::chrono::seconds{3});
 

@@ -118,7 +118,9 @@ std::optional<int> Process::waitFor(std::chrono::milliseconds timeout) {
     return child_.exit_code();
 }
 
-Server::Server() : listener_(context_, {boost::asio::ip::address_v4::loopback(), 0}) {
+Server::Server(bool wildcard)
+    : listener_(context_, {wildcard ? boost::asio::ip::address_v4::any()
+                                  : boost::asio::ip::address_v4::loopback(), 0}) {
     listener_.non_blocking(true);
 }
 
