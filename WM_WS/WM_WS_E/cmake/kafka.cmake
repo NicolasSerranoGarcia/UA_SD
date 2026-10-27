@@ -12,7 +12,7 @@ endif()
 
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
-  pkg_check_modules(RDKAFKA QUIET IMPORTED_TARGET rdkafka++)
+  pkg_check_modules(RDKAFKA QUIET IMPORTED_TARGET rdkafka++ rdkafka)
 endif()
 if(TARGET PkgConfig::RDKAFKA)
   target_link_libraries(wm_ws_kafka INTERFACE PkgConfig::RDKAFKA)
@@ -30,10 +30,14 @@ FetchContent_Declare(
   GIT_TAG 69b1865efdc0118cd017760d038d34e52fb3f0d0 # v2.11.1
 )
 FetchContent_MakeAvailable(librdkafka)
-target_link_libraries(wm_ws_kafka INTERFACE rdkafka++)
+target_link_libraries(wm_ws_kafka INTERFACE rdkafka++ rdkafka)
 
 # Match the installed header layout used by the Engine's includes.
 file(MAKE_DIRECTORY "${librdkafka_BINARY_DIR}/include/librdkafka")
 configure_file("${librdkafka_SOURCE_DIR}/src-cpp/rdkafkacpp.h"
   "${librdkafka_BINARY_DIR}/include/librdkafka/rdkafkacpp.h" COPYONLY)
+foreach(header IN ITEMS rdkafka.h rdkafka_mock.h)
+  configure_file("${librdkafka_SOURCE_DIR}/src/${header}"
+    "${librdkafka_BINARY_DIR}/include/librdkafka/${header}" COPYONLY)
+endforeach()
 target_include_directories(wm_ws_kafka INTERFACE "${librdkafka_BINARY_DIR}/include")

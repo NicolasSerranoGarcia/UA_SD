@@ -7,6 +7,7 @@ add_library(wm_ws_engine
   app/app.cpp
   app/options.cpp
   app/health_server.cpp
+  kafka/service.cpp
 )
 
 target_compile_features(wm_ws_engine PUBLIC cxx_std_23)
@@ -18,5 +19,5 @@ target_include_directories(wm_ws_engine
 
 target_link_libraries(wm_ws_engine
   PUBLIC ninttp::ninttp
-  PRIVATE engine_core wm_ws_kafka Boost::program_options
+  PRIVATE engine_core wm_ws_station wm_ws_kafka Boost::program_options
 )

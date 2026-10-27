@@ -19,7 +19,9 @@ std::expected<std::optional<Options>, std::string> parseOptions(int argc, char *
         "hcp-port", po::value<int>()->default_value(HCP_PORT),
         "Local HCP listening port (1-65535)")("hcp-timeout-ms",
                                               po::value<int>()->default_value(2000),
-                                              "HCP receive/send deadline in milliseconds");
+                                              "HCP receive/send deadline in milliseconds")(
+        "state-file", po::value<std::string>()->default_value("wm-ws-state.jsonl"),
+        "Persistent Kafka/session journal path (use one file per station)");
 
     po::variables_map vm;
     try {
@@ -52,7 +54,10 @@ std::expected<std::optional<Options>, std::string> parseOptions(int argc, char *
     }
     const auto timeout = std::chrono::milliseconds{timeoutMs};
 
-    return Options{std::string{queueEndpoint}, static_cast<std::uint16_t>(hcpPort), timeout};
+    const auto stateFile = vm["state-file"].as<std::string>();
+    if (stateFile.empty())
+        return std::unexpected(std::string{"state-file must not be empty"});
+    return Options{std::string{queueEndpoint}, static_cast<std::uint16_t>(hcpPort), timeout, stateFile};
 }
 
 } // namespace app

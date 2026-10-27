@@ -15,3 +15,7 @@ gtest_discover_tests(poll_test PROPERTIES TIMEOUT 10)
 add_executable(kafka_station_test kafka_station_test.cpp)
 target_link_libraries(kafka_station_test PRIVATE wm_ws_station GTest::gtest_main)
 gtest_discover_tests(kafka_station_test PROPERTIES TIMEOUT 10)
+
+add_executable(kafka_service_test kafka_service_test.cpp)
+target_link_libraries(kafka_service_test PRIVATE wm_ws_engine wm_ws_station wm_ws_kafka GTest::gtest_main)
+gtest_discover_tests(kafka_service_test PROPERTIES TIMEOUT 45)

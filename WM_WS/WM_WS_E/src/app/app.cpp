@@ -2,14 +2,13 @@
 
 #include "app/health_server.hpp"
 #include "engine/engine.hpp"
+#include "kafka/service.hpp"
 #include "poll/poll.hpp"
 #include <chrono>
 #include <cstdlib>
 #include <exception>
 #include <expected>
 #include <iostream>
-#include <librdkafka/rdkafkacpp.h>
-#include <memory>
 #include <stop_token>
 #include <string>
 #include <system_error>
@@ -19,23 +18,9 @@
 namespace app {
 namespace {
 
-std::expected<std::unique_ptr<RdKafka::Producer>, std::string>
-createProducer(const std::string &endpoint) {
-    std::unique_ptr<RdKafka::Conf> config{RdKafka::Conf::create(RdKafka::Conf::CONF_GLOBAL)};
-    if (!config)
-        return std::unexpected(std::string{"creating Kafka configuration failed"});
-    std::string error;
-    if (config->set("bootstrap.servers", endpoint, error) != RdKafka::Conf::CONF_OK)
-        return std::unexpected(error);
-    std::unique_ptr<RdKafka::Producer> producer{RdKafka::Producer::create(config.get(), error)};
-    if (!producer)
-        return std::unexpected(error);
-    return producer;
-}
-
 // Poll before reading so a fatal server error can stop this worker even with stdin open.
 // EOF disables console commands; the service continues in containers without a terminal.
-void readConsole(std::stop_token stop, Engine &engine) {
+void readConsole(std::stop_token stop, Engine &engine, kafka::Service &kafka) {
     try {
         while (!stop.stop_requested()) {
             const auto input = poll::poll(std::chrono::milliseconds{100});
@@ -50,6 +35,16 @@ void readConsole(std::stop_token stop, Engine &engine) {
                 continue;
             const char key = input->character;
             switch (key) {
+            case 's':
+            case 'S':
+                std::osyncstream(std::cout) << "[Engine][Console] local irrigation "
+                    << (kafka.startLocal() ? "started" : "denied: station is not activated or available")
+                    << std::endl;
+                break;
+            case 'e':
+            case 'E':
+                kafka.stopLocal();
+                break;
             case 'f':
             case 'F':
                 engine.injectFault();
@@ -79,16 +74,11 @@ void readConsole(std::stop_token stop, Engine &engine) {
 } // namespace
 
 int run(const Options &options) {
-    auto producer = createProducer(options.queueEndpoint);
-    if (!producer) {
-        std::osyncstream(std::cerr) << "[Engine][Kafka] producer initialization failed: "
-                                   << producer.error() << '\n';
-        return 1;
-    }
-    std::osyncstream(std::cout) << "[Engine][Kafka] producer initialized; bootstrap="
+    std::osyncstream(std::cout) << "[Engine][Kafka] waiting for Monitor activation; bootstrap="
                                << options.queueEndpoint << std::endl;
     Engine engine;
-    std::jthread input([&engine](std::stop_token stop) { readConsole(stop, engine); });
+    kafka::Service kafka(engine, options.queueEndpoint, options.stateFile);
+    std::jthread input([&engine, &kafka](std::stop_token stop) { readConsole(stop, engine, kafka); });
     const auto result = serveHealth(engine, options.hcpPort, options.hcpTimeout);
     if (!result) {
         std::osyncstream(std::cerr) << "[Monitor][HCP] health service failed: " << result.error()

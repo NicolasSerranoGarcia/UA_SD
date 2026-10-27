@@ -13,6 +13,7 @@ struct Options {
     std::string queueEndpoint;
     std::uint16_t hcpPort;
     std::chrono::milliseconds hcpTimeout;
+    std::string stateFile = "wm-ws-state.jsonl";
 };
 
 // An empty optional means --help was printed; an unexpected value is a CLI error.
