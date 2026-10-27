@@ -1,12 +1,12 @@
 import json
 import queue
 import threading
-from confluent_kafka import Consumer, Producer, KafkaException, KafkaError
+from confluent_kafka import Consumer, Producer, KafkaException, KafkaError, TopicPartition
+from confluent_kafka.admin import AdminClient
 
 FORMAT = "utf-8"
 
-cent_notif_queue = queue.Queue() # Queue for the broadcast messages
-response_queue = queue.Queue() # Queue for the unicast response messages
+central_notis_queue = queue.Queue() # Queue for the unicast response messages
 telemetry_queue = queue.Queue() # Queue for the telemetry
 
 ##########################
@@ -57,6 +57,19 @@ def start_consumers(bootstrap_servers: str, operator_id: int, stop_event: thread
     thread_notifications.start()
     thread_telemetry.start()    
 
+def _num_partitions_for_topic(bootstrap_servers: str, topic: str):
+    """Function that consults the number of partitions of a specific topic"""
+    
+    admin_client = AdminClient({"bootstrap.servers": bootstrap_servers})
+
+    metadata = admin_client.list_topics(topic=topic, timeout=5.0)
+
+    if topic in metadata.topics:
+        return len(metadata.topics[topic].partitions)
+    else:
+        raise Exception(f"Topic {topic} does not exist in the cluster")
+
+
 def _generic_kafka_consumer(bootstrap_servers: str, operator_id: int, topic: str, stop_event: threading.Event):
     """Function that creates a generic consumer"""
     
@@ -65,14 +78,20 @@ def _generic_kafka_consumer(bootstrap_servers: str, operator_id: int, topic: str
         "group.id": f"group-notis-{operator_id}",
         "auto.offset.reset": "latest",
     }
+    
     try:
         
         consumer = Consumer(config)
-        consumer.subscribe([topic])
+        
+        num_particiones = _num_partitions_for_topic(bootstrap_servers, topic)
+        dest_partition = operator_id % num_particiones
+        tp = TopicPartition(topic=topic, partition=dest_partition)
+        
+        consumer.assign([tp])
         
     except Exception as e:
         
-        print("[KAFKA ERROR] Failed creating consumer")
+        print(f"[KAFKA ERROR] Failed creating consumer: {e}")
     
     # While FO has not exited the main program
     while not stop_event.is_set():
@@ -96,19 +115,7 @@ def _generic_kafka_consumer(bootstrap_servers: str, operator_id: int, topic: str
             
             if topic == "central-notis":
                 
-                target_fo = data.get("operator_id")
-                
-                if target_fo == operator_id: # Unicast message
-                    
-                    response_queue.put(data)
-                    
-                elif target_fo is None: # Broadcast message
-                    
-                    cent_notif_queue.put(data)
-                    
-                else:
-                    
-                    continue
+                central_notis_queue.put(data)
                 
             elif topic == "telemetry":
                 
