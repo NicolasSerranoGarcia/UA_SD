@@ -20,6 +20,7 @@ struct Options {
     std::chrono::milliseconds hcpRetry;
     std::chrono::milliseconds napInterval;
     std::chrono::milliseconds napTimeout;
+    std::string logFile = "log/wm-ws-monitor.log";
 };
 
 // An empty optional means --help was printed; an unexpected value is a CLI error.

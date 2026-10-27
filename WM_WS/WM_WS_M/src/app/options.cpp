@@ -14,24 +14,26 @@ constexpr int HCP_PORT = 8080;
 std::expected<std::optional<Options>, std::string> parseOptions(int argc, char *argv[],
                                                                 std::ostream &output) {
     po::options_description desc("Allowed options");
-    desc.add_options()("help", "produce help message")(
+    desc.add_options()("help", "Show available options and exit")(
         "ws-id", po::value<std::string>()->required(),
         "Watering station ID (required; 1-64 letters, digits, hyphens or underscores)")(
         "engine-ip", po::value<std::string>()->required(),
         "Engine IPv4 address in dotted-decimal format (required)")(
         "engine-port", po::value<int>()->default_value(HCP_PORT),
-        "Engine HCP port (1-65535)")("hcp-timeout-ms", po::value<int>()->default_value(2000),
+        "Engine connection port (1-65535)")("hcp-timeout-ms", po::value<int>()->default_value(2000),
                                      "Connect/send/response deadline in milliseconds")(
         "hcp-retry-ms", po::value<int>()->default_value(1000),
         "Delay between connection attempts in milliseconds")(
         "nap-interval-ms", po::value<int>()->default_value(1000),
-        "NAP OK reporting and KO retry interval in milliseconds")(
+        "Delay between status reports and retries to Central, in milliseconds")(
         "nap-timeout-ms", po::value<int>()->default_value(2000),
-        "NAP connect/send/response deadline in milliseconds")(
+        "Maximum wait for Central to respond, in milliseconds")(
         "central-hostname", po::value<std::string>()->required(), "Central hostname (required)")(
         "central-port", po::value<int>()->required(), "Central port (required)")(
         "monitor-location", po::value<std::string>()->default_value("spain"),
-        "Location of the station");
+        "Location of the station")(
+        "log-file", po::value<std::string>()->default_value("log/wm-ws-monitor.log"),
+        "Save activity logs here; serious errors also appear on screen");
 
     po::variables_map vm;
     try {
@@ -88,6 +90,9 @@ std::expected<std::optional<Options>, std::string> parseOptions(int argc, char *
     if (location.empty() || location.find('#') != std::string::npos) {
         return std::unexpected(std::string{"monitor-location must be nonempty and contain no #"});
     }
+    const auto logFile = vm["log-file"].as<std::string>();
+    if (logFile.empty())
+        return std::unexpected(std::string{"log-file must not be empty"});
     return Options{wsId,
                    *engineEndpoint,
                    vm["central-hostname"].as<std::string>(),
@@ -96,7 +101,7 @@ std::expected<std::optional<Options>, std::string> parseOptions(int argc, char *
                    std::chrono::milliseconds{timeoutMs},
                    std::chrono::milliseconds{retryMs},
                    std::chrono::milliseconds{napIntervalMs},
-                   std::chrono::milliseconds{napTimeoutMs}};
+                   std::chrono::milliseconds{napTimeoutMs}, logFile};
 }
 
 } // namespace app

@@ -1,3 +1,4 @@
+#include "logging.hpp"
 #include "app/app.hpp"
 
 #include "hcp.hpp"
@@ -22,23 +23,21 @@ namespace {
 void printAddresses(const ninttp::ResolvedAddresses &addresses) {
     for (const auto &endpoint : addresses.ipv4) {
         const auto address = endpoint.addressHostOrder();
-        std::clog << "[Central][DNS] IPv4 endpoint: " << ((address >> 24) & 0xff) << '.'
+        logging::record() << "[Central][DNS] IPv4 endpoint: " << ((address >> 24) & 0xff) << '.'
                   << ((address >> 16) & 0xff) << '.' << ((address >> 8) & 0xff) << '.'
                   << (address & 0xff) << ':' << endpoint.portHostOrder() << '\n';
     }
     for (const auto &endpoint : addresses.ipv6) {
         const auto bytes = endpoint.addressBytes();
-        std::clog << "[Central][DNS] IPv6 endpoint: [";
-        const auto flags = std::clog.flags();
-        std::clog << std::hex;
+        auto log = logging::record();
+        log << "[Central][DNS] IPv6 endpoint: [" << std::hex;
         for (std::size_t i = 0; i < bytes.size(); i += 2) {
             if (i != 0)
-                std::clog << ':';
-            std::clog << ((static_cast<unsigned int>(bytes[i]) << 8) |
+                log << ':';
+            log << ((static_cast<unsigned int>(bytes[i]) << 8) |
                           static_cast<unsigned int>(bytes[i + 1]));
         }
-        std::clog.flags(flags);
-        std::clog << "]:" << endpoint.portHostOrder() << '\n';
+        log << "]:" << std::dec << endpoint.portHostOrder() << std::endl;
     }
 }
 
@@ -72,7 +71,7 @@ registerStation(const ninttp::IPv4Endpoint &centralEndpoint, const std::string &
         }
         if (stop.stop_requested())
             return {};
-        std::osyncstream(std::cout) << "[Central][NAP] ws=" << wsId
+        logging::record() << "[Central][NAP] ws=" << wsId
                                    << (alreadyRegistered ? " already registered; proceeding to activation"
                                                          : " registration acknowledged")
                                    << std::endl;
@@ -120,7 +119,7 @@ std::string session(const ninttp::IPv4Endpoint &engineEndpoint, const std::strin
         const std::string_view status(response.data(), response.size());
         if (status != hcp::okMsg && status != hcp::koMsg)
             return "invalid HCP health response";
-        std::osyncstream(std::cout) << "[Engine][HCP] ws=" << wsId << " health=" << status
+        logging::record() << "[Engine][HCP] ws=" << wsId << " health=" << status
                                    << std::endl;
         reporter.update(status == hcp::okMsg, status);
         const auto acknowledgedActivation = reporter.activationGeneration();
@@ -163,7 +162,8 @@ int run(const Options &options, std::stop_token stop, StatusObserver observer) {
     const auto failed = [&](std::string reason) {
         if (stop.stop_requested())
             return stopped();
-        std::cerr << "Error: " << reason << '\n';
+        logging::fatal("Monitor", "Monitoring could not start or continue.", reason,
+                       "Check Central's address/port, station registration, and connectivity, then restart Monitor.");
         snapshot.phase = Phase::Failed;
         snapshot.lastError = std::move(reason);
         publish();
@@ -210,7 +210,7 @@ int run(const Options &options, std::stop_token stop, StatusObserver observer) {
         }
         if (stop.stop_requested())
             break;
-        std::osyncstream(std::cerr) << "[Engine][HCP] ws=" << options.wsId
+        logging::record() << "[Engine][HCP] ws=" << options.wsId
                                    << " session failed: " << failure << '\n';
         reporter.update(false, failure);
         snapshot.phase = Phase::Retrying;

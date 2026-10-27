@@ -2,12 +2,70 @@
 
 #include "paths.hpp"
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <gtest/gtest.h>
 #include <string>
 #include <thread>
 
 namespace {
 namespace ts = testSupport;
+
+struct TemporaryLog {
+    std::filesystem::path path = std::filesystem::temp_directory_path() /
+        ("wm-terminal-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".log");
+    ~TemporaryLog() { std::error_code ignored; std::filesystem::remove(path, ignored); }
+    std::string read() const {
+        std::ifstream stream(path);
+        return {std::istreambuf_iterator<char>(stream), {}};
+    }
+};
+
+TEST(Process, EngineMenuKeepsRoutineLogsInFileAndQuitsWithOpenStdin) {
+    TemporaryLog log;
+    std::uint16_t port;
+    { ts::Server reservation; port = reservation.port(); }
+    ts::Process engine(ts::enginePath, {"--queue", "127.0.0.1:9092", "--hcp-port",
+        std::to_string(port), "--log-file", log.path.string()}, true);
+    engine.sendInput("help\nstatus\nquit\n");
+    const auto result = engine.waitFor(std::chrono::seconds{5});
+    ASSERT_TRUE(result) << engine.errors();
+    EXPECT_EQ(*result, 0) << engine.errors();
+    for (const auto *action : {"Start irrigation", "Stop irrigation", "Simulate a fault", "Repair the fault", "Status", "Quit"})
+        EXPECT_NE(engine.output().find(action), std::string::npos) << action;
+    EXPECT_EQ(engine.output().find("[Engine][Kafka]"), std::string::npos);
+    EXPECT_NE(log.read().find("[Engine][Kafka]"), std::string::npos);
+}
+
+TEST(Process, MonitorMenuIsVisibleAndCanQuitDuringStartup) {
+    TemporaryLog log;
+    ts::Server central;
+    auto arguments = ts::monitorArguments(central.port());
+    arguments.insert(arguments.end(), {"--nap-timeout-ms", "100", "--log-file", log.path.string()});
+    ts::Process monitor(ts::monitorPath, arguments, true);
+    monitor.sendInput("help\nstatus\nquit\n");
+    const auto result = monitor.waitFor(std::chrono::seconds{5});
+    ASSERT_TRUE(result) << monitor.errors();
+    EXPECT_EQ(*result, 0) << monitor.errors();
+    for (const auto *action : {"Status", "Help", "Quit"})
+        EXPECT_NE(monitor.output().find(action), std::string::npos) << action;
+    EXPECT_EQ(monitor.output().find("[Central][DNS]"), std::string::npos);
+    EXPECT_TRUE(std::filesystem::exists(log.path));
+}
+
+TEST(Process, FatalBindErrorIsActionableOnTerminalAndRecordedInFile) {
+    TemporaryLog log;
+    ts::Server occupied(true);
+    ts::Process engine(ts::enginePath, {"--queue", "127.0.0.1:9092", "--hcp-port",
+        std::to_string(occupied.port()), "--log-file", log.path.string()}, true);
+    const auto result = engine.waitFor(std::chrono::seconds{5});
+    ASSERT_TRUE(result) << engine.errors();
+    EXPECT_EQ(*result, 1);
+    EXPECT_NE(engine.errors().find("FATAL"), std::string::npos);
+    EXPECT_NE(engine.errors().find("HCP"), std::string::npos);
+    EXPECT_NE(engine.errors().find("Next step:"), std::string::npos);
+    EXPECT_NE(log.read().find("HCP bind"), std::string::npos);
+}
 
 void acknowledgeNap(ts::Tcp::socket &socket, unsigned int request) {
     const std::string body = "NAP#1.0#" + std::to_string(request) + "#3#station-1";

@@ -1,3 +1,4 @@
+#include "logging.hpp"
 #include "nap/reporter.hpp"
 
 #include "nap/connection.hpp"
@@ -59,7 +60,7 @@ bool Reporter::send(bool healthy, const std::string &reason) {
                 result = std::unexpected(response.error());
         }
         if (!result) {
-            std::osyncstream(std::cerr) << "[Central][NAP] ws=" << wsId_
+            logging::record() << "[Central][NAP] ws=" << wsId_
                                        << " activation failed: " << result.error().message() << '\n';
             return false;
         }
@@ -69,7 +70,7 @@ bool Reporter::send(bool healthy, const std::string &reason) {
             activated_ = true;
             ++activationGeneration_;
         }
-        std::osyncstream(std::cout) << "[Central][NAP] ws=" << wsId_
+        logging::record() << "[Central][NAP] ws=" << wsId_
                                    << " activation acknowledged" << std::endl;
     }
     std::expected<void, CentralConnection::Error> result;
@@ -80,18 +81,18 @@ bool Reporter::send(bool healthy, const std::string &reason) {
     if (result)
         result = connection_->sendStatus(wsId_, healthy);
     if (!result) {
-        std::osyncstream(std::cerr) << "[Central][NAP] ws=" << wsId_
+        logging::record() << "[Central][NAP] ws=" << wsId_
                                    << " status send failed: " << result.error().message() << '\n';
         return false;
     }
     auto response = connection_->getResponse();
     if (!response) {
-        std::osyncstream(std::cerr) << "[Central][NAP] ws=" << wsId_
+        logging::record() << "[Central][NAP] ws=" << wsId_
                                    << " status acknowledgement failed: "
                                    << response.error().message() << '\n';
         return false;
     }
-    std::osyncstream(std::cout) << "[Central][NAP] ws=" << wsId_
+    logging::record() << "[Central][NAP] ws=" << wsId_
                                << " status acknowledged: state=" << (healthy ? "healthy" : "fault")
                                << " reason=" << reason << std::endl;
     if (!healthy) {
@@ -122,10 +123,10 @@ void Reporter::run() {
         try {
             acknowledged = send(healthy, reason);
         } catch (const ninttp::SocketError &error) {
-            std::osyncstream(std::cerr) << "[Central][NAP] ws=" << wsId_
+            logging::record() << "[Central][NAP] ws=" << wsId_
                                        << " reporting socket failed: " << error.what() << '\n';
         } catch (const std::exception &error) {
-            std::osyncstream(std::cerr) << "[Central][NAP] ws=" << wsId_
+            logging::record() << "[Central][NAP] ws=" << wsId_
                                        << " reporting failed: " << error.what() << '\n';
         }
         if (!acknowledged) {

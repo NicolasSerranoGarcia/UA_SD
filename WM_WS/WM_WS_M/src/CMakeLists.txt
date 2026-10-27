@@ -1,6 +1,7 @@
 add_library(wm_ws_monitor
   app/app.cpp
   app/options.cpp
+  app/terminal.cpp
   nap/reporter.cpp
 )
 

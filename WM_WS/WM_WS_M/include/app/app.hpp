@@ -11,4 +11,7 @@ namespace app {
 [[nodiscard]] int run(const Options &options, std::stop_token stop = {},
                       StatusObserver observer = {});
 
+// Terminal frontend; the backend and Qt frontend share the same monitoring logic.
+[[nodiscard]] int runTerminal(const Options &options);
+
 } // namespace app

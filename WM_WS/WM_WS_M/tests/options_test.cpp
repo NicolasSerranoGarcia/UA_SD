@@ -46,6 +46,7 @@ TEST(MonitorOptions, ParsesOwnedConfigurationAndDefaultsWithoutDns) {
     EXPECT_EQ(options.hcpRetry, std::chrono::milliseconds{1000});
     EXPECT_EQ(options.napInterval, std::chrono::milliseconds{1000});
     EXPECT_EQ(options.napTimeout, std::chrono::milliseconds{2000});
+    EXPECT_EQ(options.logFile, "log/wm-ws-monitor.log");
 }
 
 TEST(MonitorOptions, RejectsMissingRequiredOptions) {
@@ -82,6 +83,6 @@ INSTANTIATE_TEST_SUITE_P(
                     std::pair{"--hcp-retry-ms", "-1"}, std::pair{"--nap-timeout-ms", "0"},
                     std::pair{"--nap-interval-ms", "-1"},
                     std::pair{"--monitor-location", "invalid#location"},
-                    std::pair{"--monitor-location", ""}));
+                    std::pair{"--monitor-location", ""}, std::pair{"--log-file", ""}));
 
 } // namespace

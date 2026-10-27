@@ -2,6 +2,7 @@
 
 #include "app/app.hpp"
 #include "gui/window.hpp"
+#include "logging.hpp"
 #include <QApplication>
 #include <QMetaObject>
 #include <exception>
@@ -23,7 +24,8 @@ int run(int argc, char *argv[], const app::Options &options) {
                                       Qt::QueuedConnection);
         };
         const auto failed = [&](const char *reason) {
-            std::cerr << "Error: " << reason << '\n';
+            logging::fatal("Monitor", "The monitoring worker stopped unexpectedly.", reason,
+                           "Check the log and Engine/Central connectivity, then restart Monitor.");
             latest.phase = app::Phase::Failed;
             latest.lastError = reason;
             publish(latest);
