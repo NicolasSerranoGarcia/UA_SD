@@ -7,13 +7,18 @@ from confluent_kafka.admin import AdminClient
 FORMAT = "utf-8"
 
 central_notis_queue = queue.Queue() # Queue for the unicast response messages
-telemetry_queue = queue.Queue() # Queue for the telemetry
+telemetry_queue = queue.Queue(maxsize=1) # Queue for the telemetry. Preserves only the most recent value
 
 ##########################
 ### PRODUCER FUNCTIONS ###
 ##########################
 
-def send_command(producer: Producer, operator_id: int, station_id: int | None, type: str, duration: int | None = None):
+def send_command(producer: Producer,
+                operator_id: int, 
+                station_id: int | None, 
+                type: str, 
+                operation_code: int, 
+                duration: int | None = None):
     
     if producer is None:
         print("[ERROR] Producer is not created. Command omitted.")
@@ -22,6 +27,7 @@ def send_command(producer: Producer, operator_id: int, station_id: int | None, t
     msg = {"operator_id": operator_id, 
            "station_id": station_id, 
            "command_type": type,
+           "operation_code": operation_code,
            "duration": duration}
     try: 
         producer.produce(topic="fo-req", value=json.dumps(msg).encode(FORMAT))
@@ -113,13 +119,34 @@ def _generic_kafka_consumer(bootstrap_servers: str, operator_id: int, topic: str
             
             data: dict = json.loads(msg.value().decode(FORMAT))
             
-            if topic == "central-notis":
+            target_fo = data.get("operator_id")
+            
+            if target_fo == operator_id:
+            
+                if topic == "central-notis":
+                    
+                    central_notis_queue.put(data)
+                    
+                elif topic == "telemetry":
+                    
+                    # This code section is done to extract the previous value and substitute it by the most recent one
+                    try:
+                        telemetry_queue.put_nowait(data)
+                        
+                    except queue.Full:
+                        
+                        try:
+                            
+                            telemetry_queue.get_nowait()
+                        
+                        except queue.Empty:
+                            
+                            pass
+                        
+                        telemetry_queue.put_nowait(data)
+            else:
                 
-                central_notis_queue.put(data)
-                
-            elif topic == "telemetry":
-                
-                telemetry_queue.put(data)
+                continue
         
         except Exception as e:
             

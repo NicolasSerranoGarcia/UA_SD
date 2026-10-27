@@ -2,6 +2,18 @@ import time
 import os
 import subprocess
 
+RESET = "\033[0m"
+TEXT_BLACK = "\033[30m"
+TEXT_WHITE = "\033[97m"
+
+STATUS_STYLES = {
+    "Available": f"\033[42m{TEXT_BLACK}",
+    "Watering": f"\033[5;42m{TEXT_BLACK}",
+    "Leak": f"\033[41m{TEXT_WHITE}",
+    "Out of service": f"\033[48;5;208m{TEXT_BLACK}",
+    "Disconnected": f"\033[100m{TEXT_WHITE}",
+}
+
 def print_menu():
     """Procedure that prints the menu"""
     
@@ -72,3 +84,13 @@ def read_file(file_path: str, format: str = 'utf-8') -> list:
                   
             
     return commands
+
+def print_station(station: tuple):
+    
+    station_id, location, status = station
+    
+    style = STATUS_STYLES.get(status, default="")
+    
+    status_badge = f"{style} {status:<15} {RESET}" if style else f"{status:<15}"
+    
+    print(f"{str(station_id):<8} {location:<25} {status_badge}")
