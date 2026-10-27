@@ -13,15 +13,17 @@ constexpr int HCP_PORT = 8080;
 std::expected<std::optional<Options>, std::string> parseOptions(int argc, char *argv[],
                                                                 std::ostream &output) {
     po::options_description desc("Allowed options");
-    desc.add_options()("help", "produce help message")(
+    desc.add_options()("help", "Show available options and exit")(
         "queue", po::value<std::string>(),
         "Set the Kafka broker endpoint address (usually hostname for TCP proxy)")(
         "hcp-port", po::value<int>()->default_value(HCP_PORT),
-        "Local HCP listening port (1-65535)")("hcp-timeout-ms",
+        "Port where Monitor connects to Engine (1-65535)")("hcp-timeout-ms",
                                               po::value<int>()->default_value(2000),
-                                              "HCP receive/send deadline in milliseconds")(
-        "state-file", po::value<std::string>()->default_value("wm-ws-state.jsonl"),
-        "Persistent Kafka/session journal path (use one file per station)");
+                                              "Maximum wait for a Monitor message, in milliseconds")(
+        "state-file", po::value<std::string>()->default_value("state/wm-ws-state.jsonl"),
+        "Save station recovery data here (use a separate path for each station)")(
+        "log-file", po::value<std::string>()->default_value("log/wm-ws-engine.log"),
+        "Save activity logs here; serious errors also appear on screen");
 
     po::variables_map vm;
     try {
@@ -57,7 +59,10 @@ std::expected<std::optional<Options>, std::string> parseOptions(int argc, char *
     const auto stateFile = vm["state-file"].as<std::string>();
     if (stateFile.empty())
         return std::unexpected(std::string{"state-file must not be empty"});
-    return Options{std::string{queueEndpoint}, static_cast<std::uint16_t>(hcpPort), timeout, stateFile};
+    const auto logFile = vm["log-file"].as<std::string>();
+    if (logFile.empty())
+        return std::unexpected(std::string{"log-file must not be empty"});
+    return Options{std::string{queueEndpoint}, static_cast<std::uint16_t>(hcpPort), timeout, stateFile, logFile};
 }
 
 } // namespace app

@@ -1,8 +1,10 @@
+#include "logging.hpp"
 #include "kafka/service.hpp"
 
 #include "kafka/station.hpp"
 #include "kafka/journal.hpp"
 #include <iostream>
+#include <atomic>
 #include <librdkafka/rdkafkacpp.h>
 #include <map>
 #include <mutex>
@@ -22,7 +24,7 @@ void configure(RdKafka::Conf &configuration, const std::string &name, const std:
 
 } // namespace
 
-struct Service::Impl : RdKafka::DeliveryReportCb {
+struct Service::Impl : RdKafka::DeliveryReportCb, RdKafka::EventCb {
     Engine &engine;
     std::string endpoint;
     Journal journal;
@@ -34,6 +36,10 @@ struct Service::Impl : RdKafka::DeliveryReportCb {
     int commandPartition = -1;
     bool inFlight = false;
     bool failed = false;
+    std::string failureMessage;
+    std::atomic<bool> brokerFatal = false;
+    std::mutex brokerErrorMutex;
+    std::string brokerError;
     std::optional<bool> delivered;
     std::chrono::steady_clock::time_point nextMetadata{};
     std::chrono::steady_clock::time_point nextCheckpoint{};
@@ -56,6 +62,21 @@ struct Service::Impl : RdKafka::DeliveryReportCb {
         delivered = message.err() == RdKafka::ERR_NO_ERROR;
     }
 
+    void event_cb(RdKafka::Event &event) override {
+        logging::record() << "[Engine][Kafka][" << event.fac() << "] " << event.str() << std::endl;
+        if (event.type() == RdKafka::Event::EVENT_ERROR && event.fatal()) {
+            std::lock_guard lock(brokerErrorMutex);
+            brokerError = "Kafka error " + std::to_string(static_cast<int>(event.err())) + ": " + event.str();
+            brokerFatal.store(true);
+        }
+    }
+
+    void configureLogging(RdKafka::Conf &configuration) {
+        std::string error;
+        if (configuration.set("event_cb", static_cast<RdKafka::EventCb *>(this), error) != RdKafka::Conf::CONF_OK)
+            throw std::runtime_error(error);
+    }
+
     void save() {
         journal.save(station->checkpoint());
         nextCheckpoint = std::chrono::steady_clock::now() + std::chrono::seconds{1};
@@ -71,16 +92,18 @@ struct Service::Impl : RdKafka::DeliveryReportCb {
         save();
         std::string error;
         std::unique_ptr<RdKafka::Conf> configuration{RdKafka::Conf::create(RdKafka::Conf::CONF_GLOBAL)};
+        configureLogging(*configuration);
         configure(*configuration, "bootstrap.servers", endpoint);
         configure(*configuration, "enable.idempotence", "true");
         configure(*configuration, "message.timeout.ms", "3000");
         configure(*configuration, "socket.timeout.ms", "1000");
-        if (configuration->set("dr_cb", this, error) != RdKafka::Conf::CONF_OK)
+        if (configuration->set("dr_cb", static_cast<RdKafka::DeliveryReportCb *>(this), error) != RdKafka::Conf::CONF_OK)
             throw std::runtime_error(error);
         producer.reset(RdKafka::Producer::create(configuration.get(), error));
         if (!producer)
             throw std::runtime_error(error);
         configuration.reset(RdKafka::Conf::create(RdKafka::Conf::CONF_GLOBAL));
+        configureLogging(*configuration);
         configure(*configuration, "bootstrap.servers", endpoint);
         configure(*configuration, "group.id", "wm-ws-" + id);
         configure(*configuration, "enable.auto.commit", "false");
@@ -113,7 +136,7 @@ struct Service::Impl : RdKafka::DeliveryReportCb {
             RdKafka::TopicPartition::create("central-ops", *desired, RdKafka::Topic::OFFSET_STORED)};
         if (consumer->assign({assignment.get()}) == RdKafka::ERR_NO_ERROR) {
             commandPartition = *desired;
-            std::osyncstream(std::cout) << "[Engine][Kafka] ws=" << id
+            logging::record() << "[Engine][Kafka] ws=" << id
                                        << " central-ops partition=" << commandPartition << std::endl;
         }
     }
@@ -146,13 +169,20 @@ struct Service::Impl : RdKafka::DeliveryReportCb {
                     if (!station && !id.empty()) {
                         if (!partitionFor(id, 1)) {
                             // Legacy nonnumeric HCP IDs remain usable for health-only tests.
-                            std::osyncstream(std::cerr) << "[Engine][Kafka] numeric WS ID required for modulo routing\n";
+                            failed = true;
+                            failureMessage = "Kafka routing requires a numeric station ID; received '" + id + "'.";
+                            logging::fatal("Engine", "Kafka messaging is disabled for this station.", failureMessage,
+                                           "Restart Engine and Monitor with a numeric --ws-id.");
                             return;
                         }
                         initialize(id);
                     }
                     if (station) {
                         producer->poll(0);
+                        if (brokerFatal.load()) {
+                            std::lock_guard lock(brokerErrorMutex);
+                            throw std::runtime_error(brokerError);
+                        }
                         if (delivered) {
                             if (*delivered && !station->events().empty())
                                 station->events().pop_front();
@@ -177,7 +207,7 @@ struct Service::Impl : RdKafka::DeliveryReportCb {
                                         static_cast<const char *>(message->payload()), message->len()},
                                         [this] { save(); });
                                     if (!handled)
-                                        std::osyncstream(std::cerr) << "[Engine][Kafka] " << handled.error() << '\n';
+                                        logging::record() << "[Engine][Kafka] " << handled.error() << '\n';
                                     save();
                                     (void)consumer->commitAsync(message.get());
                                 }
@@ -194,10 +224,12 @@ struct Service::Impl : RdKafka::DeliveryReportCb {
         } catch (const std::exception &error) {
             std::lock_guard lock(mutex);
             failed = true;
+            failureMessage = error.what();
             if (producer)
                 (void)producer->purge(RdKafka::Producer::PURGE_QUEUE | RdKafka::Producer::PURGE_INFLIGHT);
             engine.injectFault();
-            std::osyncstream(std::cerr) << "[Engine][Kafka] service stopped safely: " << error.what() << '\n';
+            logging::fatal("Engine", "Kafka service stopped; irrigation has been stopped safely.", error.what(),
+                           "Check the broker configuration and checkpoint storage, then restart Engine.");
         }
     }
 };
@@ -226,6 +258,11 @@ void Service::stopLocal() {
         impl_->station->stopLocal();
         impl_->save();
     }
+}
+
+std::optional<std::string> Service::failureReason() const {
+    std::lock_guard lock(impl_->mutex);
+    return impl_->failed ? std::optional{impl_->failureMessage} : std::nullopt;
 }
 
 } // namespace kafka

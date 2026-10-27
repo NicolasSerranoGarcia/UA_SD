@@ -7,6 +7,7 @@ add_library(wm_ws_engine
   app/app.cpp
   app/options.cpp
   app/health_server.cpp
+  app/terminal.cpp
   kafka/service.cpp
 )
 
@@ -14,7 +15,7 @@ target_compile_features(wm_ws_engine PUBLIC cxx_std_23)
 
 target_include_directories(wm_ws_engine
   PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../include"
-  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../shared"
+  PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../../shared"
 )
 
 target_link_libraries(wm_ws_engine

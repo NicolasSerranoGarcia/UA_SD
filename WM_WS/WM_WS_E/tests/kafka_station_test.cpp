@@ -242,4 +242,22 @@ TEST(KafkaJournal, KeepsTwoCheckpointsAndSurvivesTornLatestWrite) {
     EXPECT_EQ(prior->at("counter").as_int64(), 19);
 }
 
+TEST(KafkaJournal, CreatesStateDirectoriesAndLoadsSavedData) {
+    const auto directory = std::filesystem::temp_directory_path() /
+        ("wm-state-directory-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    struct Cleanup {
+        std::filesystem::path directory;
+        ~Cleanup() { std::error_code ignored; std::filesystem::remove_all(directory, ignored); }
+    } cleanup{directory};
+    const auto path = directory / "state" / "station.jsonl";
+    kafka::Journal journal(path);
+    EXPECT_FALSE(journal.load());
+    const boost::json::object saved{{"station_id", 1}};
+    journal.save(saved);
+    kafka::Journal recovered(path);
+    const auto loaded = recovered.load();
+    ASSERT_TRUE(loaded);
+    EXPECT_EQ(*loaded, saved);
+}
+
 } // namespace

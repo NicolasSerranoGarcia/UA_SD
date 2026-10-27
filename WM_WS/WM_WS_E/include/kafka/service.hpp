@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
 
 class Engine;
@@ -16,6 +17,7 @@ class Service {
     Service &operator=(const Service &) = delete;
     bool startLocal();
     void stopLocal();
+    [[nodiscard]] std::optional<std::string> failureReason() const;
 
   private:
     struct Impl;

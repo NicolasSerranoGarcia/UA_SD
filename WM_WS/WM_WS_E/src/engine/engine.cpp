@@ -71,6 +71,11 @@ bool Engine::isActivated() const {
     return activated_;
 }
 
+bool Engine::isMonitorConnected() const {
+    std::lock_guard lock(mutex_);
+    return monitorConnected_;
+}
+
 bool Engine::canPublish() const {
     std::lock_guard lock(mutex_);
     return monitorConnected_ && monitorAuthorized_;

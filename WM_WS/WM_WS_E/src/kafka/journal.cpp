@@ -55,6 +55,8 @@ std::optional<boost::json::object> Journal::load() {
 }
 
 void Journal::save(const boost::json::object &state) {
+    if (!path_.parent_path().empty())
+        std::filesystem::create_directories(path_.parent_path());
     const auto revision = revision_ + 1;
     auto path = path_;
     path += revision % 2 ? ".1" : ".0";

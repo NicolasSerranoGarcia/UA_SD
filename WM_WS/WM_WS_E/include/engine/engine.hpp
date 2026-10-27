@@ -56,6 +56,8 @@ class Engine {
 
     [[nodiscard]] bool isActivated() const;
 
+    [[nodiscard]] bool isMonitorConnected() const;
+
     [[nodiscard]] bool canPublish() const;
 
     struct Reading {
