@@ -116,7 +116,8 @@ Run this block once to create the network and start both modules. The engine use
 
 ```bash
 docker network create wm-network
-docker run -di --name wm-engine --network wm-network wm-engine
+docker volume create wm-engine-state
+docker run -di --name wm-engine --network wm-network -v wm-engine-state:/var/lib/wm-ws wm-engine
 ENGINE_IP=$(docker inspect -f '{{(index .NetworkSettings.Networks "wm-network").IPAddress}}' wm-engine)
 docker run -d --name wm-monitor --network wm-network -e WS_ID=1 -e ENGINE_IP="$ENGINE_IP" wm-monitor
 docker logs wm-engine
@@ -164,6 +165,16 @@ and Central should acknowledge `state=fault`. Type `r` and press Enter to repair
 the monitor should return to `health=OK` and Central should acknowledge
 `state=healthy`.
 
+Type `s` to start a manual irrigation when activated, and `e` to end it. Manual
+starts publish `ws-start-conf` with `station_id` and `operation_code: null`;
+Central assigns the operation code internally. A Central `BLOCK` ends the current
+irrigation and prevents further manual starts. Only an external `ACTIVATE` can
+clear that block; it does not resume the old irrigation.
+
+Repair returns Engine to idle. Monitor sends a new NAP activation and waits for
+Central's acknowledgement before sending HCP `AC`. With Monitor stopped, Engine
+stops watering, rejects starts, and withholds Kafka output until reactivated.
+
 Detach with `Ctrl+P`, then `Ctrl+Q` to leave the engine running. The engine also
 accepts `q` to exit; avoid it unless testing shutdown.
 
@@ -198,6 +209,7 @@ all timeout, interval, and retry values must be positive milliseconds.
 | `--queue HOST:PORT` | Required | Kafka bootstrap endpoint; must be nonempty. |
 | `--hcp-port PORT` | `8080` | Local TCP port for monitor health connections, listening on all IPv4 interfaces. |
 | `--hcp-timeout-ms MS` | `2000` | HCP receive/send deadline. |
+| `--state-file PATH` | `wm-ws-state.jsonl` | Base path for two synced checkpoint files (`.0` and `.1`); use a separate path per station. |
 
 Copy-and-paste example with every operational parameter:
 
@@ -253,6 +265,7 @@ default; a runtime environment variable overrides that default for one container
 | Image | Parameter | Default | Executable argument |
 | --- | --- | --- | --- |
 | `wm-engine` | `QUEUE_ENDPOINT` | `iriguchi.proxy.rlwy.net:37040` | `--queue` |
+| `wm-engine` | `STATE_FILE` | `/var/lib/wm-ws/state.jsonl` | `--state-file` |
 | `wm-monitor` | `WS_ID` | `1` | `--ws-id` |
 | `wm-monitor` | `ENGINE_IP` | `127.0.0.1` | `--engine-ip` |
 | `wm-monitor` | `ENGINE_PORT` | `8080` | `--engine-port` |
@@ -261,6 +274,35 @@ default; a runtime environment variable overrides that default for one container
 
 The remaining CLI options have no Docker environment-variable mapping. To change
 them, use an explicit executable command as shown above.
+
+The named volume in the run example retains pending confirmations and final water
+totals when the container is recreated. Keep the same volume for recovery of that
+station; give independent stations separate volumes. Kafka IDs must be numeric
+to match Central/FO and modulo routing; legacy alphanumeric HCP IDs support health
+checks only. WS consumes only its `station_id % partition_count` partition of
+`central-ops` and still filters station IDs to handle modulo collisions.
+
+WS-produced telemetry uses `operator_id % partition_count` when there is an owning
+FO. Without an FO, it uses the station ID for routing; Central reads all partitions.
+Confirmations and final summaries use the station ID. Wire fields match
+[the repository README](../Readme.md); checkpoint metadata is local only.
+
+Central should retry an operation with the same `operation_code` until it receives
+its confirmation. WS persists operation intent before valve changes and reuses
+cached results for retries. First-time consumer groups start at the latest offset;
+subsequent starts use committed offsets. Do not change partition counts during a
+running evaluation; producers and consumers must use the same counts.
+
+Delivery of pending records is at least once. The README's final-summary format has
+no session/operation identifier, so identical summaries cannot always be distinguished
+from retransmissions after a crash. Central must account for that contract limitation.
+The recovery summary uses the last persisted measurements, checkpointed every second
+while watering; it never invents water measurements from time spent offline.
+
+Central integration: healthy NAP reports indicate Monitor liveness and must not
+erase Watering/Out-of-service state. Central must mark a lost healthy Monitor
+connection as Disconnected (including EOF), while an acknowledged KO remains a
+leak until reactivation. Telemetry must not override Monitor-derived disconnection.
 
 Build argument example:
 
@@ -309,7 +351,8 @@ Boost and GoogleTest fallbacks as the applications.
 ## Cleanup
 
 Stop following or attaching to the containers before removing them. These commands
-remove only the two named test containers and their network; images are retained.
+remove only the two named test containers and their network; images and the station
+state volume are retained.
 
 ```bash
 docker stop wm-monitor wm-engine
