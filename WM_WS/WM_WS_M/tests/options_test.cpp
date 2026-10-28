@@ -54,6 +54,20 @@ TEST(MonitorOptions, RejectsMissingRequiredOptions) {
     EXPECT_FALSE(parse({"WM_WS_M"}, output).has_value());
 }
 
+TEST(MonitorOptions, AcceptsEngineHostnameWithoutResolvingDuringParsing) {
+    auto arguments = validArguments();
+    for (auto &argument : arguments)
+        if (argument == "--engine-ip") argument = "--engine-hostname";
+    arguments[4] = "engine.example.invalid";
+    std::ostringstream output;
+    const auto parsed = parse(arguments, output);
+    ASSERT_TRUE(parsed) << parsed.error();
+    ASSERT_TRUE(*parsed);
+    EXPECT_EQ((**parsed).engineHostname, "engine.example.invalid");
+    arguments.insert(arguments.end(), {"--engine-ip", "127.0.0.1"});
+    EXPECT_FALSE(parse(arguments, output));
+}
+
 class InvalidMonitorOption : public testing::TestWithParam<std::pair<std::string, std::string>> {};
 
 TEST_P(InvalidMonitorOption, RejectsInvalidValue) {

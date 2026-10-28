@@ -17,8 +17,10 @@ std::expected<std::optional<Options>, std::string> parseOptions(int argc, char *
     desc.add_options()("help", "Show available options and exit")(
         "ws-id", po::value<std::string>()->required(),
         "Watering station ID (required; 1-64 letters, digits, hyphens or underscores)")(
-        "engine-ip", po::value<std::string>()->required(),
-        "Engine IPv4 address in dotted-decimal format (required)")(
+        "engine-ip", po::value<std::string>(),
+        "Engine IPv4 address; supply this or --engine-hostname")(
+        "engine-hostname", po::value<std::string>(),
+        "Engine hostname, resolved again on each connection attempt")(
         "engine-port", po::value<int>()->default_value(HCP_PORT),
         "Engine connection port (1-65535)")("hcp-timeout-ms", po::value<int>()->default_value(2000),
                                      "Connect/send/response deadline in milliseconds")(
@@ -53,7 +55,12 @@ std::expected<std::optional<Options>, std::string> parseOptions(int argc, char *
             std::string{"--ws-id must contain 1-64 letters, digits, hyphens or underscores"});
     }
 
-    const std::string_view engineIp = vm["engine-ip"].as<std::string>();
+    if (vm.count("engine-ip") + vm.count("engine-hostname") != 1)
+        return std::unexpected(std::string{"Supply exactly one of --engine-ip or --engine-hostname"});
+    const auto engineHostname = vm.count("engine-hostname") ? vm["engine-hostname"].as<std::string>() : "";
+    if (vm.count("engine-hostname") && engineHostname.empty())
+        return std::unexpected(std::string{"engine-hostname must not be empty"});
+    const std::string engineIp = vm.count("engine-ip") ? vm["engine-ip"].as<std::string>() : "127.0.0.1";
 
     const int enginePort = vm["engine-port"].as<int>();
     if (enginePort < 1 || enginePort > 65535) {
@@ -101,7 +108,7 @@ std::expected<std::optional<Options>, std::string> parseOptions(int argc, char *
                    std::chrono::milliseconds{timeoutMs},
                    std::chrono::milliseconds{retryMs},
                    std::chrono::milliseconds{napIntervalMs},
-                   std::chrono::milliseconds{napTimeoutMs}, logFile};
+                   std::chrono::milliseconds{napTimeoutMs}, logFile, engineHostname};
 }
 
 } // namespace app

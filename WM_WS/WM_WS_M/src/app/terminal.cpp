@@ -31,11 +31,20 @@ void show(const Options &options, const Status &status) {
            << "Station: " << options.wsId << " | Location: " << options.location
            << "\nState: " << phaseName(status.phase)
            << "\nEngine health: " << (status.health == Health::Ok ? "Healthy" : status.health == Health::Ko ? "Fault detected - repair is needed" : "Waiting for a health response")
-           << "\nEngine: " << ((address >> 24) & 0xff) << '.' << ((address >> 16) & 0xff)
-           << '.' << ((address >> 8) & 0xff) << '.' << (address & 0xff)
-           << ':' << options.engineEndpoint.portHostOrder()
+           << "\nEngine: ";
+    if (options.engineHostname.empty())
+        output << ((address >> 24) & 0xff) << '.' << ((address >> 16) & 0xff)
+               << '.' << ((address >> 8) & 0xff) << '.' << (address & 0xff);
+    else
+        output << options.engineHostname;
+    output << ':' << options.engineEndpoint.portHostOrder()
            << "\nCentral: " << options.centralHostname << ':' << options.centralPort
+           << "\nCentral connection: " << (status.centralAvailable ? "Available" : "Unavailable - retrying automatically")
            << "\nActivity log: " << options.logFile;
+    if (!status.centralAvailable)
+        output << "\nNew irrigation must wait for Central. Existing watering can finish while Monitor stays connected.";
+    if (!status.centralError.empty())
+        output << "\nCentral could not complete the exchange. Check its address, service, and the activity log.";
     if (!status.lastError.empty())
         output << "\nA connection problem was recorded. See the activity log for details.";
     output << "\n\n  [P / 1] Status of this station"
@@ -61,7 +70,8 @@ int runTerminal(const Options &options) {
             bool changed;
             {
                 std::lock_guard lock(mutex);
-                changed = latest.phase != status.phase || latest.health != status.health;
+                changed = latest.phase != status.phase || latest.health != status.health ||
+                          latest.centralAvailable != status.centralAvailable || latest.centralError != status.centralError;
                 latest = status;
             }
             if (changed && status.phase != Phase::Stopped)

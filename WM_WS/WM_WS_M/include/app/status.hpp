@@ -17,6 +17,8 @@ struct Status {
     std::optional<ninttp::IPv4Endpoint> centralEndpoint;
     std::optional<std::chrono::system_clock::time_point> lastHealth;
     std::string lastError;
+    bool centralAvailable = false;
+    std::string centralError;
 };
 
 // Called synchronously on the monitoring thread; adapters own dispatch to their UI.

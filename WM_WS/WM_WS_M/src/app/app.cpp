@@ -20,67 +20,6 @@
 namespace app {
 namespace {
 
-void printAddresses(const ninttp::ResolvedAddresses &addresses) {
-    for (const auto &endpoint : addresses.ipv4) {
-        const auto address = endpoint.addressHostOrder();
-        logging::record() << "[Central][DNS] IPv4 endpoint: " << ((address >> 24) & 0xff) << '.'
-                  << ((address >> 16) & 0xff) << '.' << ((address >> 8) & 0xff) << '.'
-                  << (address & 0xff) << ':' << endpoint.portHostOrder() << '\n';
-    }
-    for (const auto &endpoint : addresses.ipv6) {
-        const auto bytes = endpoint.addressBytes();
-        auto log = logging::record();
-        log << "[Central][DNS] IPv6 endpoint: [" << std::hex;
-        for (std::size_t i = 0; i < bytes.size(); i += 2) {
-            if (i != 0)
-                log << ':';
-            log << ((static_cast<unsigned int>(bytes[i]) << 8) |
-                          static_cast<unsigned int>(bytes[i + 1]));
-        }
-        log << "]:" << std::dec << endpoint.portHostOrder() << std::endl;
-    }
-}
-
-std::expected<void, std::string>
-registerStation(const ninttp::IPv4Endpoint &centralEndpoint, const std::string &wsId,
-                    std::string_view location, std::chrono::milliseconds timeout,
-                    std::stop_token stop) {
-    using Connection = nap::Connection<ninttp::IPv4Endpoint>;
-    {
-        Connection registration(timeout);
-
-        auto opened = registration.open(centralEndpoint);
-        if (!opened) {
-            return std::unexpected("connecting to central failed. Reason: " + opened.error().message());
-        }
-        if (stop.stop_requested())
-            return {};
-
-        auto registered = registration.sendRegistration(wsId, location);
-        if (!registered) {
-            return std::unexpected("sending registration failed. Reason: " + registered.error().message());
-        }
-        if (stop.stop_requested())
-            return {};
-        auto response = registration.getResponse();
-        // An existing station still needs activation when Monitor restarts.
-        const bool alreadyRegistered = !response && response.error().type == Connection::Error::Type::Nack &&
-                                       response.error().nackCode == 1;
-        if (!response && !alreadyRegistered) {
-            return std::unexpected("registration rejected or response failed. Reason: " + response.error().message());
-        }
-        if (stop.stop_requested())
-            return {};
-        logging::record() << "[Central][NAP] ws=" << wsId
-                                   << (alreadyRegistered ? " already registered; proceeding to activation"
-                                                         : " registration acknowledged")
-                                   << std::endl;
-    }
-
-    // Activation follows a healthy Engine response, owned by the NAP reporter.
-    return {};
-}
-
 hcp::Deadline deadline(std::chrono::milliseconds timeout) {
     return std::chrono::steady_clock::now() + timeout;
 }
@@ -107,6 +46,7 @@ std::string session(const ninttp::IPv4Endpoint &engineEndpoint, const std::strin
     std::mutex mutex;
     std::condition_variable_any wake;
     std::uint64_t activationGeneration = 0;
+    bool centralDownSent = false;
     while (!stop.stop_requested()) {
         std::unique_lock lock(mutex);
         wake.wait_for(lock, stop, std::chrono::seconds{1}, [] { return false; });
@@ -122,8 +62,23 @@ std::string session(const ninttp::IPv4Endpoint &engineEndpoint, const std::strin
         logging::record() << "[Engine][HCP] ws=" << wsId << " health=" << status
                                    << std::endl;
         reporter.update(status == hcp::okMsg, status);
-        const auto acknowledgedActivation = reporter.activationGeneration();
-        if (status == hcp::okMsg && acknowledgedActivation != 0 &&
+        const auto central = reporter.status();
+        if (central.fatal) return "Central rejected registration or reporting: " + central.lastError;
+        snapshot.centralAvailable = central.available;
+        snapshot.centralError = central.lastError;
+        snapshot.centralEndpoint = central.endpoint;
+        const auto acknowledgedActivation = central.activationGeneration;
+        if (!central.available && activationGeneration != 0 && !centralDownSent) {
+            if (auto result = hcp::sendExact(socket, "DC", deadline(timeout)); !result)
+                return "Central availability send: " + result.error().message();
+            std::array<char, 2> acknowledgement{};
+            if (auto result = hcp::receiveExact(socket, acknowledgement, deadline(timeout)); !result)
+                return "Central availability response: " + result.error().message();
+            if (std::string_view{acknowledgement.data(), acknowledgement.size()} != hcp::okMsg)
+                return "Engine rejected Central availability notification";
+            centralDownSent = true;
+        }
+        if (central.available && status == hcp::okMsg && acknowledgedActivation != 0 &&
             acknowledgedActivation != activationGeneration) {
             if (auto result = hcp::sendExact(socket, "AC", deadline(timeout)); !result)
                 return "activation send: " + result.error().message();
@@ -134,10 +89,12 @@ std::string session(const ninttp::IPv4Endpoint &engineEndpoint, const std::strin
             if (std::string_view{activationResponse.data(), activationResponse.size()} != hcp::okMsg &&
                 std::string_view{activationResponse.data(), activationResponse.size()} != hcp::koMsg)
                 return "invalid HCP activation response";
-            if (std::string_view{activationResponse.data(), activationResponse.size()} == hcp::okMsg)
-                activationGeneration = acknowledgedActivation;
+            // KO may retain an administrative block while still acknowledging Central availability.
+            activationGeneration = acknowledgedActivation;
+            centralDownSent = false;
         }
         snapshot.phase = Phase::Monitoring;
+        snapshot.lastError.clear();
         snapshot.health = status == hcp::okMsg ? Health::Ok : Health::Ko;
         snapshot.lastHealth = std::chrono::system_clock::now();
         if (observer)
@@ -172,44 +129,35 @@ int run(const Options &options, std::stop_token stop, StatusObserver observer) {
     if (stop.stop_requested())
         return stopped();
     publish();
-    const auto addresses = ninttp::dns::resolve(options.centralHostname, options.centralPort);
-    if (stop.stop_requested())
-        return stopped();
-    if (!addresses) {
-        return failed("resolving central hostname failed: " +
-                      std::string(ninttp::SocketError{addresses.error()}.what()));
-    }
-    printAddresses(*addresses);
-    if (addresses->ipv4.empty()) {
-        return failed("central hostname resolved to no IPv4 endpoints");
-    }
-    const auto centralEndpoint = addresses->ipv4.front();
-    snapshot.centralEndpoint = centralEndpoint;
-    snapshot.phase = Phase::Registering;
-    publish();
-    if (stop.stop_requested())
-        return stopped();
-    if (auto result = registerStation(centralEndpoint, options.wsId, options.location,
-                                          options.napTimeout, stop); !result)
-        return failed(result.error());
-    if (stop.stop_requested())
-        return stopped();
-
+    nap::Reporter reporter(ninttp::IPv4Endpoint::loopback(options.centralPort), options.wsId,
+                           options.napInterval, options.napTimeout, options.location, options.centralHostname);
     snapshot.phase = Phase::Monitoring;
     publish();
-    nap::Reporter reporter(centralEndpoint, options.wsId, options.napInterval, options.napTimeout);
     std::mutex mutex;
     std::condition_variable_any wake;
     while (!stop.stop_requested()) {
         std::string failure;
         try {
-            failure = session(options.engineEndpoint, options.wsId, options.hcpTimeout, reporter,
-                              stop, snapshot, observer);
+            auto endpoint = options.engineEndpoint;
+            if (!options.engineHostname.empty()) {
+                const auto addresses = ninttp::dns::resolve(options.engineHostname, endpoint.portHostOrder());
+                if (!addresses || addresses->ipv4.empty())
+                    failure = "Cannot resolve Engine's address. Retrying automatically.";
+                else
+                    endpoint = addresses->ipv4.front();
+            }
+            if (failure.empty())
+                failure = session(endpoint, options.wsId, options.hcpTimeout, reporter, stop, snapshot, observer);
         } catch (const ninttp::SocketError &error) {
             failure = error.what();
         }
         if (stop.stop_requested())
             break;
+        const auto central = reporter.status();
+        snapshot.centralAvailable = central.available;
+        snapshot.centralError = central.lastError;
+        snapshot.centralEndpoint = central.endpoint;
+        if (central.fatal) return failed(central.lastError);
         logging::record() << "[Engine][HCP] ws=" << options.wsId
                                    << " session failed: " << failure << '\n';
         reporter.update(false, failure);

@@ -31,7 +31,7 @@ TEST(MonitorApp, StopBeforeStartupSkipsNetworkAndReportsStopped) {
     EXPECT_FALSE(updates.back().centralEndpoint.has_value());
 }
 
-TEST(MonitorApp, StartupFailurePublishesResolvedEndpointAndReason) {
+TEST(MonitorApp, StartupOutagePublishesErrorAndRetriesUntilStopped) {
     boost::asio::io_context context;
     using Tcp = boost::asio::ip::tcp;
     // Reserve a local port without listening, so no other process can accept it.
@@ -40,15 +40,25 @@ TEST(MonitorApp, StartupFailurePublishesResolvedEndpointAndReason) {
     reserved.bind(Tcp::endpoint(boost::asio::ip::address_v4::loopback(), 0));
     const auto port = reserved.local_endpoint().port();
     std::vector<app::Status> updates;
-    EXPECT_EQ(app::run(options(port), {},
-                       [&](const app::Status &status) { updates.push_back(status); }), 1);
-    ASSERT_GE(updates.size(), 3);
+    std::stop_source stop;
+    std::jthread watchdog([&](std::stop_token done) {
+        for (int i = 0; i < 300 && !done.stop_requested(); ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds{10});
+        if (!done.stop_requested()) stop.request_stop();
+    });
+    bool observed = false;
+    EXPECT_EQ(app::run(options(port), stop.get_token(), [&](const app::Status &status) {
+        updates.push_back(status);
+        if (!status.centralError.empty()) { observed = true; stop.request_stop(); }
+    }), 0);
+    watchdog.request_stop();
+    EXPECT_TRUE(observed);
     EXPECT_EQ(updates.front().phase, app::Phase::Resolving);
-    EXPECT_EQ(updates.back().phase, app::Phase::Failed);
-    ASSERT_TRUE(updates.back().centralEndpoint.has_value());
+    EXPECT_EQ(updates.back().phase, app::Phase::Stopped);
+    ASSERT_TRUE(updates.back().centralEndpoint);
     EXPECT_EQ(updates.back().centralEndpoint->portHostOrder(), port);
-    EXPECT_FALSE(updates.back().lastError.empty());
-    EXPECT_EQ(updates.back().health, app::Health::Unknown);
+    EXPECT_FALSE(updates.back().centralAvailable);
+    EXPECT_FALSE(updates.back().centralError.empty());
 }
 
 TEST(MonitorApp, ReportsHealthAndDisconnectAndStopsWithoutWaitingForRetry) {
