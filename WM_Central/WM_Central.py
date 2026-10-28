@@ -78,13 +78,14 @@ def main():
     
     argparser = argparse.ArgumentParser(description="Central for Water Management Network")
     
+    argparser.add_argument("--server-ip", type=str, default=os.getenv("SERVER_IP", "0.0.0.0"), help="Listening ip of the socket server")
     argparser.add_argument("--port", type=int, default=int(os.getenv("PORT", 8080)), help="Listening port of the socket server")
     argparser.add_argument("--kafka-ip", type=str, default=os.getenv("KAFKA_IP", "iriguchi.proxy.rlwy.net"), help="IP of the kafka bootstrap server")
     argparser.add_argument("--kafka-port", type=int, default=int(os.getenv("KAFKA_PORT", 37040)),help="Port of the kafka bootstrap server")
     
     args = argparser.parse_args()
     
-    server_ip = "0.0.0.0"
+    server_ip = args.server_ip
     server_port = args.port
     kafka_ip = args.kafka_ip
     kafka_port = args.kafka_port
