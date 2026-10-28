@@ -19,6 +19,7 @@ services:
       dockerfile: WM_WS_M/Dockerfile
     environment:
       WS_ID: "${WS_ID:-1}"
+      ENGINE_HOSTNAME: engine
       ENGINE_PORT: "8080"
       CENTRAL_HOSTNAME: "${CENTRAL_HOSTNAME:-altaria.proxy.rlwy.net}"
       CENTRAL_PORT: "${CENTRAL_PORT:-40931}"
@@ -27,14 +28,6 @@ services:
       - station-logs:/var/log/wm-ws
     stdin_open: true
     tty: true
-    # Monitor accepts numeric IPv4 addresses; resolve Compose's service name at startup.
-    command:
-      - sh
-      - -ec
-      - |
-        ENGINE_IP=$$(getent ahostsv4 engine | awk 'NR == 1 { print $$1 }')
-        test -n "$$ENGINE_IP"
-        exec ./build/WM_WS_M --ws-id "$$WS_ID" --engine-ip "$$ENGINE_IP" --engine-port "$$ENGINE_PORT" --central-hostname "$$CENTRAL_HOSTNAME" --central-port "$$CENTRAL_PORT" --log-file "$$LOG_FILE"
 
 volumes:
   engine-state:
