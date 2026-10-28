@@ -68,11 +68,19 @@ def _num_partitions_for_topic(bootstrap_servers: str, topic: str):
     
     admin_client = AdminClient({"bootstrap.servers": bootstrap_servers})
 
-    metadata = admin_client.list_topics(topic=topic, timeout=5.0)
+    try:
+        metadata = admin_client.list_topics(topic=topic, timeout=5.0)
+        
+    except KafkaException as e:
+        
+        print("[KAFKA ERROR] Error listing topics")
 
     if topic in metadata.topics:
+        
         return len(metadata.topics[topic].partitions)
+    
     else:
+        
         raise Exception(f"Topic {topic} does not exist in the cluster")
 
 
@@ -95,7 +103,7 @@ def _generic_kafka_consumer(bootstrap_servers: str, operator_id: int, topic: str
         
         consumer.assign([tp])
         
-    except Exception as e:
+    except (Exception, KafkaException) as e:
         
         print(f"[KAFKA ERROR] Failed creating consumer: {e}")
     
