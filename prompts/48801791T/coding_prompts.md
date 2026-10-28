@@ -34,3 +34,27 @@ py .\WM_Central\clienteprueba.py localhost 8080 NAP#<protocol-version>#<ack-code
 ---
 
 ### *Create a loop in Python that handles the messages received and placed into the queue by the consumer.*
+
+---
+
+### *Could you provide me with some Python code that queries a Kafka server and returns the number of partitions for a given topic?*
+
+---
+
+### *Show me a way in Python to print text to the command line while overwriting the current line.*
+
+---
+
+### *Provide a Python function to display a station with a specific background color based on its status, according to the following table:*
+*Available = Green background*
+
+*Watering = Flashing green background*
+
+*Leak = Red background*
+
+*Out of service = Orange background*
+
+*Disconnected = Gray background*
+
+*Give me also the header with format*
+--- 
