@@ -266,3 +266,59 @@ TEST(Engine, LeakCanReportFinalTotalsButRequiresNapReactivationBeforeStarting) {
     EXPECT_FALSE(engine.isRunning());
     EXPECT_TRUE(engine.start());
 }
+
+TEST(Engine, CentralLossKeepsCurrentIrrigationButRejectsNewStarts) {
+    Engine engine;
+    engine.setMonitorConnected(true);
+    ASSERT_TRUE(engine.activateFromMonitor());
+    ASSERT_TRUE(engine.start());
+    engine.setCentralAvailable(false);
+    EXPECT_TRUE(engine.isRunning());
+    EXPECT_TRUE(engine.canPublish());
+    ASSERT_TRUE(engine.stop());
+    const auto refused = engine.start();
+    ASSERT_FALSE(refused);
+    EXPECT_EQ(refused.error().type, Engine::ErrorType::CentralUnavailable);
+    ASSERT_TRUE(engine.activateFromMonitor());
+    EXPECT_TRUE(engine.isCentralAvailable());
+    EXPECT_TRUE(engine.start());
+}
+
+TEST(Engine, CentralRecoveryPreservesAdministrativeBlock) {
+    Engine engine;
+    engine.setMonitorConnected(true);
+    ASSERT_TRUE(engine.activateFromMonitor());
+    ASSERT_TRUE(engine.block(0));
+    engine.setCentralAvailable(false);
+    EXPECT_FALSE(engine.unblock(0));
+    EXPECT_FALSE(engine.activateFromMonitor());
+    EXPECT_TRUE(engine.isCentralAvailable());
+    EXPECT_TRUE(engine.isBlocked());
+    EXPECT_FALSE(engine.start());
+    EXPECT_TRUE(engine.unblock(0));
+}
+
+TEST(Engine, DurableMeterExposesOnlyCommittedProgressAndStopsImmediately) {
+    Engine engine;
+    engine.enableDurableMetering();
+    engine.setMonitorConnected(true);
+    ASSERT_TRUE(engine.activateFromMonitor());
+    ASSERT_TRUE(engine.start());
+    std::this_thread::sleep_for(std::chrono::milliseconds{30});
+    const auto sample = engine.sampleMeter();
+    EXPECT_GT(sample.reading.volumeLiters, 0);
+    EXPECT_EQ(engine.reading().volumeLiters, 0);
+    engine.commitMeter(sample);
+    EXPECT_EQ(engine.reading().volumeLiters, sample.reading.volumeLiters);
+    engine.setMonitorConnected(false);
+    EXPECT_FALSE(engine.isRunning());
+    EXPECT_EQ(engine.measureFlow(), 0);
+    const auto final = engine.sampleMeter();
+    engine.commitMeter(final);
+    EXPECT_GE(engine.reading().volumeLiters, sample.reading.volumeLiters);
+    engine.setMonitorConnected(true);
+    ASSERT_TRUE(engine.activateFromMonitor());
+    ASSERT_TRUE(engine.start());
+    engine.commitMeter(final); // An old session cannot overwrite a new irrigation.
+    EXPECT_EQ(engine.reading().volumeLiters, 0);
+}

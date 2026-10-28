@@ -263,4 +263,40 @@ TEST(KafkaJournal, CreatesStateDirectoriesAndLoadsSavedData) {
     EXPECT_EQ(*loaded, saved);
 }
 
+TEST_F(KafkaStation, CentralOutageRejectsNewIrrigationWithoutCreatingSession) {
+    engine.setCentralAvailable(false);
+    EXPECT_FALSE(station.startLocal());
+    ASSERT_TRUE(station.handle(command("IRRIGATION")));
+    EXPECT_FALSE(engine.isRunning());
+    EXPECT_EQ(station.events().back().value.at("status").as_string(), "KO");
+    EXPECT_TRUE(station.checkpoint().at("session").is_null());
+}
+
+TEST_F(KafkaStation, RejectsUnsupportedCheckpointVersions) {
+    auto state = station.checkpoint();
+    state["version"] = 2;
+    EXPECT_FALSE(station.restore(state));
+}
+
+TEST(KafkaJournal, RejectsCorruptSlotsAndUnwritableCheckpointDirectory) {
+    const auto path = std::filesystem::temp_directory_path() /
+        ("wm-journal-failure-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    struct Cleanup {
+        std::filesystem::path path;
+        ~Cleanup() {
+            std::error_code ignored;
+            std::filesystem::remove(path.string() + ".0", ignored);
+            std::filesystem::remove(path.string() + ".1", ignored);
+            std::filesystem::remove(path, ignored);
+        }
+    } cleanup{path};
+    std::ofstream(path.string() + ".0") << "{broken";
+    std::ofstream(path.string() + ".1") << "{broken";
+    kafka::Journal corrupt(path);
+    EXPECT_THROW((void)corrupt.load(), std::runtime_error);
+    std::ofstream(path) << "a file cannot be used as a directory";
+    kafka::Journal unwritable(path / "state.jsonl");
+    EXPECT_THROW(unwritable.save({{"value", 1}}), std::exception);
+}
+
 } // namespace

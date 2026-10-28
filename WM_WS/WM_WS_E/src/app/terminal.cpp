@@ -53,7 +53,12 @@ void refreshMeasurements(const Engine &engine, bool cursorUpdates) {
 std::string state(const Engine &engine) {
     if (!engine.isMonitorConnected()) return "Monitor is disconnected. Irrigation is unavailable.";
     if (!engine.isHealthy()) return "A fault has been detected. Repair it before watering.";
-    if (engine.isRunning()) return "Watering in progress";
+    if (engine.isRunning()) return engine.isCentralAvailable() ? "Watering in progress" :
+        "Watering in progress. Central is unavailable; new starts are paused.";
+    if (engine.isBlocked()) return engine.isCentralAvailable() ? "Out of Service - blocked by Central" :
+        "Out of Service - blocked by Central; Central is unavailable";
+    if (engine.isActivated() && !engine.isCentralAvailable())
+        return "Central is unavailable. Waiting to accept new irrigation.";
     return engine.isActivated() ? "Ready to water" : "Waiting for activation before watering";
 }
 
@@ -65,6 +70,7 @@ void show(const Options &options, const Engine &engine, const kafka::Service &ka
            << "Station: " << (id.empty() ? "waiting for Monitor to provide the station ID" : id)
            << "\nState: " << state(engine)
            << "\nActivation: " << (engine.isActivated() ? "Active" : "Inactive - activate the station before starting")
+           << "\nCentral connection: " << (engine.isCentralAvailable() ? "Available" : "Waiting for Monitor to confirm Central is available")
            << "\nMessage broker (Kafka): " << options.queueEndpoint;
     if (kafka.failureReason())
         output << "\nMessaging is unavailable. Check the activity log and the error shown on screen.";
@@ -120,7 +126,7 @@ void readConsole(std::stop_token stop, Engine &engine, kafka::Service &kafka,
             std::string feedback;
             if (command->kind == console::Kind::Invalid) feedback = command->text;
             else if (key == "s" || key == "1" || key == "start")
-                feedback = kafka.startLocal() ? "Irrigation has started." : "Irrigation could not start. Check that Monitor is connected, the station is active, no fault is present, and watering is not already running.";
+                feedback = kafka.startLocal() ? "Irrigation has started." : "Irrigation could not start. Check that Central and Monitor are available, the station is active, no fault is present, and watering is not already running.";
             else if (key == "e" || key == "2" || key == "stop") {
                 kafka.stopLocal();
                 feedback = "Irrigation is stopped. The final water measurements have been kept.";

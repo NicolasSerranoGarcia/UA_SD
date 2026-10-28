@@ -32,7 +32,7 @@ class Station {
     void stopLocal();
     void tick();
     std::deque<Event> &events() { return events_; }
-    [[nodiscard]] boost::json::object checkpoint() const;
+    [[nodiscard]] boost::json::object checkpoint(std::optional<Engine::Reading> sample = {}) const;
     [[nodiscard]] std::expected<void, std::string> restore(const boost::json::object &state);
 
   private:

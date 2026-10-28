@@ -5,6 +5,8 @@
 #include "engine/valid_flow.hpp"
 
 #include <cassert>
+#include <cmath>
+#include <stdexcept>
 #include <algorithm>
 #include <exception>
 #include <list>
@@ -60,6 +62,7 @@ void Engine::setMonitorConnected(bool connected) {
     std::lock_guard lock(mutex_);
     monitorConnected_ = connected;
     if (!connected) {
+        centralAvailable_ = false;
         activated_ = false;
         monitorAuthorized_ = false;
         stopWateringUnlocked();
@@ -81,6 +84,21 @@ bool Engine::canPublish() const {
     return monitorConnected_ && monitorAuthorized_;
 }
 
+void Engine::setCentralAvailable(bool available) {
+    std::lock_guard lock(mutex_);
+    centralAvailable_ = available;
+}
+
+bool Engine::isCentralAvailable() const {
+    std::lock_guard lock(mutex_);
+    return centralAvailable_;
+}
+
+bool Engine::isBlocked() const {
+    std::lock_guard lock(mutex_);
+    return blockedByServer;
+}
+
 std::expected<void, Engine::Error> Engine::activateFromMonitor() {
     std::lock_guard lock(mutex_);
     if (!monitorConnected_)
@@ -88,6 +106,7 @@ std::expected<void, Engine::Error> Engine::activateFromMonitor() {
     if (state == State::Fault || faultPending_)
         return std::unexpected(Error{ErrorType::Fault});
     monitorAuthorized_ = true;
+    centralAvailable_ = true;
     recoveryRequired_ = false;
     if (blockedByServer)
         return std::unexpected(Error{ErrorType::BlockedByCentral});
@@ -128,6 +147,8 @@ std::expected<void, Engine::Error> Engine::start(internal::units::liters_min sta
     if (!activated_) {
         return std::unexpected(Error{ErrorType::NotActivated});
     }
+    if (!centralAvailable_)
+        return std::unexpected(Error{ErrorType::CentralUnavailable});
     if (state == State::Watering) {
         return std::unexpected(Error{ErrorType::AlreadyWatering});
     }
@@ -141,6 +162,8 @@ std::expected<void, Engine::Error> Engine::start(internal::units::liters_min sta
     started_ = std::chrono::steady_clock::now();
     deadline = duration ? started_ + *duration : std::chrono::steady_clock::time_point::max();
     finalReading_ = {};
+    committedReading_ = {};
+    ++meterGeneration_;
     state = State::Watering;
     return {};
 }
@@ -188,6 +211,8 @@ std::expected<void, Engine::Error> Engine::unblock(server_token /*token*/) {
         return std::unexpected(Error{ErrorType::Fault});
     if (!monitorAuthorized_ || recoveryRequired_)
         return std::unexpected(Error{ErrorType::NotActivated});
+    if (!centralAvailable_)
+        return std::unexpected(Error{ErrorType::CentralUnavailable});
     blockedByServer = false;
     activated_ = true;
     return {};
@@ -230,13 +255,45 @@ void Engine::injectFaultUnlocked() {
     valve.close();
 }
 
-Engine::Reading Engine::readingUnlocked() const {
+Engine::Reading Engine::rawReadingUnlocked() const {
     if (state != State::Watering)
         return finalReading_;
     const double elapsed = std::max(0.0, std::chrono::duration<double>(
         std::min(std::chrono::steady_clock::now(), deadline) - started_).count());
     return {internal::FlowMeter::measure(valve, elapsed),
             internal::FlowMeter::volume(valve, elapsed), elapsed};
+}
+
+Engine::Reading Engine::readingUnlocked() const {
+    return durableMetering_ ? committedReading_ : rawReadingUnlocked();
+}
+
+void Engine::enableDurableMetering() {
+    std::lock_guard lock(mutex_);
+    durableMetering_ = true;
+}
+
+Engine::MeterSample Engine::sampleMeter() const {
+    std::lock_guard lock(mutex_);
+    return {rawReadingUnlocked(), meterGeneration_};
+}
+
+void Engine::commitMeter(const MeterSample &sample) {
+    std::lock_guard lock(mutex_);
+    if (sample.generation != meterGeneration_ || sample.reading.elapsedSeconds < committedReading_.elapsedSeconds)
+        return;
+    committedReading_ = sample.reading;
+    if (state != State::Watering)
+        committedReading_.flowLitersPerMinute = 0;
+}
+
+void Engine::restoreMeter(Reading reading) {
+    std::lock_guard lock(mutex_);
+    if (state == State::Watering || !std::isfinite(reading.volumeLiters) || reading.volumeLiters < 0 ||
+        !std::isfinite(reading.elapsedSeconds) || reading.elapsedSeconds < 0)
+        throw std::invalid_argument("Invalid recovered irrigation measurements");
+    reading.flowLitersPerMinute = 0;
+    finalReading_ = committedReading_ = reading;
 }
 
 Engine::Reading Engine::reading() const {
@@ -246,8 +303,9 @@ Engine::Reading Engine::reading() const {
 
 void Engine::stopWateringUnlocked() {
     if (state == State::Watering) {
-        finalReading_ = readingUnlocked();
+        finalReading_ = rawReadingUnlocked();
         finalReading_.flowLitersPerMinute = 0;
+        committedReading_.flowLitersPerMinute = 0;
         state = State::Idle;
     }
     valve.close();

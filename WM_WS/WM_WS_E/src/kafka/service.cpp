@@ -78,12 +78,15 @@ struct Service::Impl : RdKafka::DeliveryReportCb, RdKafka::EventCb {
     }
 
     void save() {
-        journal.save(station->checkpoint());
-        nextCheckpoint = std::chrono::steady_clock::now() + std::chrono::seconds{1};
+        const auto sample = engine.sampleMeter();
+        journal.save(station->checkpoint(sample.reading));
+        engine.commitMeter(sample);
+        nextCheckpoint = std::chrono::steady_clock::now() + std::chrono::milliseconds{100};
     }
 
     void initialize(const std::string &id) {
         station = std::make_unique<Station>(engine, id);
+        engine.enableDurableMetering();
         const auto latest = journal.load();
         if (latest) {
             if (const auto restored = station->restore(*latest); !restored)

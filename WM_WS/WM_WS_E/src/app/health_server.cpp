@@ -25,9 +25,12 @@ std::expected<void, std::string> respondToHealth(Engine &engine,
     if (const auto result = hcp::receiveExact(socket, request, deadline(timeout)); !result)
         return std::unexpected(result.error().message());
     const std::string_view command{request.data(), request.size()};
-    if (command != "HC" && command != "AC")
+    if (command != "HC" && command != "AC" && command != "DC")
         return std::unexpected(std::string{"invalid HCP health request"});
-    const bool accepted = command == "AC" ? engine.activateFromMonitor().has_value() : engine.checkHealth();
+    if (command == "DC")
+        engine.setCentralAvailable(false);
+    const bool accepted = command == "DC" ||
+        (command == "AC" ? engine.activateFromMonitor().has_value() : engine.checkHealth());
     const auto status = accepted ? hcp::okMsg : hcp::koMsg;
     if (const auto result = hcp::sendExact(socket, status, deadline(timeout));
         !result)

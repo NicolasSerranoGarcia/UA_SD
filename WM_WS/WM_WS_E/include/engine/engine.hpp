@@ -25,6 +25,8 @@ class Engine {
         MonitorDisconnected,
         /// External activation is required. No additional payload.
         NotActivated,
+        /// Central is unavailable; existing irrigation may finish, but no new starts.
+        CentralUnavailable,
         /// Irrigation is already running. No additional payload.
         AlreadyWatering,
         /// Irrigation was already stopped. No additional payload
@@ -57,6 +59,9 @@ class Engine {
     [[nodiscard]] bool isActivated() const;
 
     [[nodiscard]] bool isMonitorConnected() const;
+    void setCentralAvailable(bool available);
+    [[nodiscard]] bool isCentralAvailable() const;
+    [[nodiscard]] bool isBlocked() const;
 
     [[nodiscard]] bool canPublish() const;
 
@@ -65,6 +70,17 @@ class Engine {
         double volumeLiters;
         double elapsedSeconds;
     };
+
+    struct MeterSample {
+        Reading reading;
+        std::uint64_t generation;
+    };
+
+    /// Prospective readings are for persistence only; expose them after commitMeter.
+    void enableDurableMetering();
+    [[nodiscard]] MeterSample sampleMeter() const;
+    void commitMeter(const MeterSample &sample);
+    void restoreMeter(Reading reading);
 
     /// Final totals remain readable after stopping, disconnecting, or detecting a leak.
     [[nodiscard]] Reading reading() const;
@@ -125,11 +141,13 @@ class Engine {
     void injectFaultUnlocked();
     void stopWateringUnlocked();
     [[nodiscard]] Reading readingUnlocked() const;
+    [[nodiscard]] Reading rawReadingUnlocked() const;
 
     enum class State { Idle, Watering, Fault };
 
     bool blockedByServer = false;
     bool monitorConnected_ = false;
+    bool centralAvailable_ = false;
     bool activated_ = false;
     bool monitorAuthorized_ = false;
     bool faultPending_ = false;
@@ -143,6 +161,9 @@ class Engine {
     std::chrono::steady_clock::time_point deadline{};
     std::chrono::steady_clock::time_point started_{};
     Reading finalReading_{};
+    Reading committedReading_{};
+    std::uint64_t meterGeneration_ = 0;
+    bool durableMetering_ = false;
     State state = State::Idle;
 
     struct Registry;

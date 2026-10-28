@@ -92,7 +92,7 @@ std::expected<void, std::string> Station::handle(std::string_view payload, Befor
         const bool previousBlock = blocked_;
         if (type == "BLOCK")
             blocked_ = true;
-        if (type == "IRRIGATION" && engine_.isActivated() && !engine_.isRunning())
+        if (type == "IRRIGATION" && engine_.isActivated() && engine_.isCentralAvailable() && !engine_.isRunning())
             session_ = command;
         if (beforeAction)
             beforeAction();
@@ -116,7 +116,8 @@ std::expected<void, std::string> Station::handle(std::string_view payload, Befor
             } else if (!engine_.isRunning()) {
                 session_.reset();
             }
-            reply(operation, result.has_value(), "Station is not activated, healthy, or idle");
+            reply(operation, result.has_value(), engine_.isCentralAvailable() ?
+                "Station is not activated, healthy, or idle" : "Central is unavailable; wait for recovery before starting");
         }
         intent_.reset();
         return {};
@@ -132,7 +133,8 @@ std::expected<void, std::string> Station::handle(std::string_view payload, Befor
 }
 
 bool Station::startLocal(BeforeAction beforeAction) {
-    if (!engine_.canPublish() || !engine_.isActivated() || !engine_.isHealthy() || engine_.isRunning())
+    if (!engine_.canPublish() || !engine_.isActivated() || !engine_.isCentralAvailable() ||
+        !engine_.isHealthy() || engine_.isRunning())
         return false;
     tick();
     intent_ = boost::json::object{{"station_id", numericId_}, {"operation_code", nullptr},
@@ -155,7 +157,7 @@ bool Station::startLocal(BeforeAction beforeAction) {
 void Station::finish() {
     if (!session_)
         return;
-    const auto reading = engine_.reading();
+    const auto reading = engine_.sampleMeter().reading;
     boost::json::object value{{"station_id", numericId_}, {"status", "FINISHED"},
         {"total_liters", reading.volumeLiters}, {"total_time", reading.elapsedSeconds},
         {"operator_id", session_->at("operator_id")}};
@@ -194,7 +196,7 @@ void Station::tick() {
     nextTelemetry_ = std::chrono::steady_clock::now() + std::chrono::seconds{1};
 }
 
-boost::json::object Station::checkpoint() const {
+boost::json::object Station::checkpoint(std::optional<Engine::Reading> sample) const {
     boost::json::array pending;
     for (const auto &event : events_)
         pending.push_back(boost::json::object{{"topic", event.topic}, {"recipient", event.recipient}, {"value", event.value}});
@@ -203,11 +205,11 @@ boost::json::object Station::checkpoint() const {
         replies[key] = value;
     for (const auto &[key, value] : commands_)
         commands[key] = value;
-    auto reading = engine_.reading();
+    auto reading = sample ? *sample : engine_.reading();
     if (intent_ && session_ && !engine_.isRunning() && intent_->at("type") == "IRRIGATION" &&
         intent_->at("operation_code") == session_->at("operation_code"))
         reading = {};
-    return {{"station_id", id_}, {"blocked", blocked_}, {"pending", pending},
+    return {{"version", 1}, {"station_id", id_}, {"blocked", blocked_}, {"pending", pending},
             {"replies", replies}, {"commands", commands},
             {"session", session_ ? boost::json::value(*session_) : boost::json::value{}},
             {"intent", intent_ ? boost::json::value(*intent_) : boost::json::value{}},
@@ -216,8 +218,11 @@ boost::json::object Station::checkpoint() const {
 
 std::expected<void, std::string> Station::restore(const boost::json::object &state) {
     try {
+        if (const auto *version = state.if_contains("version"); version && version->to_number<int>() != 1)
+            return std::unexpected("unsupported station checkpoint version");
         if (state.at("station_id").as_string() != id_)
             return std::unexpected("journal belongs to another station");
+        engine_.restoreMeter({0, state.at("volume_l").to_number<double>(), state.at("elapsed_s").to_number<double>()});
         blocked_ = state.at("blocked").as_bool();
         if (blocked_)
             (void)engine_.block(0);
