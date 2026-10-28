@@ -49,17 +49,23 @@ The engine's optional `BUILD_EXAMPLES` CMake option defaults to `OFF`.
 Both terminal applications show their status and all available menu options.
 Choose a letter or number and press Enter. Engine supports `start`, `stop`,
 `fault`, `repair`, `status`, `help`, and `quit`; Monitor supports `status`,
-`help`, and `quit`. Closing stdin leaves the services running. Quitting Monitor
+`help`, and `quit`. Engine updates its water measurements every second while
+watering; interactive terminals update the measurement row without repeating the
+menu. Closing stdin leaves the services running. Quitting Monitor
 disconnects it from Engine; Engine then stops watering and waits for activation.
+
+The simulated flow varies smoothly within 2% below the valve's configured flow.
+Terminal readings and Kafka telemetry use the same measurements; delivered water
+integrates the varying flow and stops accumulating when irrigation stops.
 
 Routine diagnostics are saved to files instead of the terminal. Serious errors
 remain visible on screen with technical details and a suggested next step.
 Native runs use these paths relative to the current working directory:
 
-| Data | Default path |
-| ---- | ------------ |
-| Engine activity log | `log/wm-ws-engine.log` |
-| Monitor activity log | `log/wm-ws-monitor.log` |
+| Data                 | Default path                                                    |
+| -------------------- | --------------------------------------------------------------- |
+| Engine activity log  | `log/wm-ws-engine.log`                                        |
+| Monitor activity log | `log/wm-ws-monitor.log`                                       |
 | Engine recovery data | `state/wm-ws-state.jsonl.0` and `state/wm-ws-state.jsonl.1` |
 
 Directories are created automatically. Logs append across restarts and include
@@ -115,171 +121,166 @@ the development packages for the desired display backend. See the
 [Qt platform build requirements](https://doc.qt.io/qt-6.8/build-sources.html).
 Deploy Qt shared libraries and platform plugins when distributing the GUI build.
 
-## Docker
+## Docker: two applications in two terminals
 
-Deploy a complete watering station (Engine and Monitor) with Docker Compose v2.17+
-or newer. From the repository root:
+Engine and Monitor each run in their own container, with their own interactive
+terminal and independent start/stop controls. They communicate over a shared
+Docker bridge network; they do not share a network namespace or need published
+host ports.
 
-```sh
-docker compose -f WM_WS/compose.yaml -p ws-1 up --build -d
-docker compose -f WM_WS/compose.yaml -p ws-1 logs -f
-```
+Choose one of the two workflows below. Both use the container names `wm-engine`
+and `wm-monitor`. Start Engine first and wait for its menu before starting
+Monitor. Keep terminal 1 open while using Monitor in terminal 2. Run the commands
+from the repository root in both terminals.
 
-Compose builds both existing Dockerfiles with `WM_WS` as their context and starts
-Engine before Monitor. Both services join the project's default bridge network;
-Monitor resolves `engine` to an IPv4 address at startup, because its executable
-currently accepts only numeric IPv4 addresses. No host ports or fixed container IPs
-are needed. Monitor's existing connection retries handle Engine startup. Compose
-updates/restarts of Engine also restart Monitor so it resolves the address again.
-See Docker's [Compose networking](https://docs.docker.com/compose/how-tos/networking/)
-and [startup order](https://docs.docker.com/compose/how-tos/startup-order/) documentation.
+### Option 1: build and run the images directly
 
-The project has its own `engine-state` and `station-logs` volumes, retained by
-`down`. Both applications keep interactive input open. Attach in separate
-terminals, detach with `Ctrl+P` then
-`Ctrl+Q`, stop/recover Monitor, and shut down the complete deployment with:
+Build both images and create the network and persistent storage once:
 
 ```sh
-docker compose -f WM_WS/compose.yaml -p ws-1 attach engine
-
-docker compose -f WM_WS/compose.yaml -p ws-1 attach monitor
-docker compose -f WM_WS/compose.yaml -p ws-1 stop monitor
-docker compose -f WM_WS/compose.yaml -p ws-1 start monitor
-docker compose -f WM_WS/compose.yaml -p ws-1 down
-```
-
-Docker keeps recovery data at `/var/lib/wm-ws/state.jsonl.0` and `.1`, preserving
-the existing state-volume layout. Logs are saved to
-`/var/log/wm-ws/wm-ws-engine.log` and `/var/log/wm-ws/wm-ws-monitor.log`.
-`docker compose logs` shows terminal menus and fatal errors. To follow the
-activity logs, run these in separate terminals:
-
-```sh
-docker compose -f WM_WS/compose.yaml -p ws-1 exec engine tail -f /var/log/wm-ws/wm-ws-engine.log
-docker compose -f WM_WS/compose.yaml -p ws-1 exec monitor tail -f /var/log/wm-ws/wm-ws-monitor.log
-```
-
-Compose accepts `WS_ID`, `QUEUE_ENDPOINT`, `CENTRAL_HOSTNAME`, and `CENTRAL_PORT`
-from the shell or an explicit `--env-file`. Their defaults match the Dockerfiles.
-For another independent station, use a different ID and project name; this also
-separates its network and recovery volume. In Bash:
-
-```sh
-WS_ID=2 docker compose -f WM_WS/compose.yaml -p ws-2 up --build -d
-```
-
-In PowerShell:
-
-```powershell
-$env:WS_ID = '2'
-docker compose -f WM_WS/compose.yaml -p ws-2 up --build -d
-Remove-Item Env:WS_ID
-```
-
-The following sections retain individual image and container commands for debugging
-the modules separately.
-
-Build from the `WM_WS` context so shared headers and CMake modules are copied:
-
-```sh
-docker build -f WM_WS/WM_WS_M/Dockerfile -t wm-monitor WM_WS
-docker build -f WM_WS/WM_WS_M/Dockerfile --build-arg BUILD_GUI=ON -t wm-monitor-gui WM_WS
 docker build -f WM_WS/WM_WS_E/Dockerfile -t wm-engine WM_WS
-```
+docker build -f WM_WS/WM_WS_M/Dockerfile -t wm-monitor WM_WS
 
-The Monitor image includes Qt6 development packages. Qt is linked only when
-`BUILD_GUI=ON`. A future graphical application will also need access to a
-display server when run inside a container.
-
-## Run on the same Docker network
-
-These containers have separate network namespaces and communicate over a Docker
-bridge network. No host port publishing is needed. The monitor currently requires
-a numeric engine IPv4 address; a Docker container name is not accepted.
-
-Run this block once to create the network and start both modules. The engine uses
-`-i` so its console remains available for fault injection through `docker attach`.
-
-```bash
 docker network create wm-network
 docker volume create wm-engine-state
-docker run -di --name wm-engine --network wm-network -v wm-engine-state:/var/lib/wm-ws wm-engine
-ENGINE_IP=$(docker inspect -f '{{(index .NetworkSettings.Networks "wm-network").IPAddress}}' wm-engine)
-docker run -d --name wm-monitor --network wm-network -e WS_ID=1 -e ENGINE_IP="$ENGINE_IP" wm-monitor
-docker logs wm-engine
-docker logs -f wm-monitor
+docker volume create wm-station-logs
 ```
 
-Press `Ctrl+C` to stop following logs; the containers continue running. If the
-network already exists, skip `docker network create`. Existing containers with
-these names must be removed using the cleanup commands below before rerunning.
-Reinspect the engine IP if its container is recreated.
+Skip network creation if `wm-network` already exists. Repeating volume creation
+keeps existing data. The `WM_WS` build context includes the shared headers and
+CMake modules.
 
-For PowerShell, use the same commands but replace the `ENGINE_IP=...` assignment
-with:
+In **terminal 1**, start Engine with its interactive menu:
+
+```sh
+docker run -it --name wm-engine --network wm-network -v wm-engine-state:/var/lib/wm-ws -v wm-station-logs:/var/log/wm-ws wm-engine
+```
+
+In **terminal 2**, find Engine's address and start Monitor. In Bash:
+
+```bash
+ENGINE_IP=$(docker inspect -f '{{(index .NetworkSettings.Networks "wm-network").IPAddress}}' wm-engine)
+docker run -it --name wm-monitor --network wm-network -v wm-station-logs:/var/log/wm-ws -e WS_ID=1 -e ENGINE_IP="$ENGINE_IP" wm-monitor
+```
+
+In PowerShell, use this block instead:
 
 ```powershell
 $ENGINE_IP = docker inspect -f '{{(index .NetworkSettings.Networks "wm-network").IPAddress}}' wm-engine
+docker run -it --name wm-monitor --network wm-network -v wm-station-logs:/var/log/wm-ws -e WS_ID=1 -e ENGINE_IP="$ENGINE_IP" wm-monitor
 ```
 
-Expected results:
+Monitor currently accepts a numeric IPv4 address. Its image default, `127.0.0.1`,
+refers to Monitor's own container. Reinspect Engine's address if you recreate its
+container, then recreate Monitor with the updated `ENGINE_IP`.
 
-- Engine logs show `listening on 0.0.0.0:8080` (the current log prefix is `[Monitor][HCP]`).
-- Monitor logs show registration acknowledged, or already registered, followed by activation acknowledged.
-- Monitor logs show `[Engine][HCP] ws=1 health=OK` and Central status acknowledgements with `state=healthy`.
+### Option 2: use Compose to launch each application separately
 
-The default `ENGINE_IP=127.0.0.1` only works when both processes share a network
-namespace, or when running both executables directly on the same host. Override
-it as above for separate containers on a bridge network.
+Compose can build the images and supply the network, volumes, and environment
+settings from `WM_WS/compose.yaml`. Use `run` in each terminal to launch a single
+container in the foreground. Each command starts only the selected application.
+There is no automatic startup or restart dependency between them.
 
-## Test faults and recovery
+In **terminal 1**, build and launch Engine:
 
-In one terminal, follow the monitor:
-
-```bash
-docker logs -f wm-monitor
+```sh
+docker compose -f WM_WS/compose.yaml -p ws-1 run --build --no-deps --use-aliases --name wm-engine engine
 ```
 
-In another terminal, attach to the engine:
+In **terminal 2**, build and launch Monitor:
 
-```bash
-docker attach wm-engine
+```sh
+docker compose -f WM_WS/compose.yaml -p ws-1 run --build --no-deps --name wm-monitor monitor
 ```
 
-Type `f` and press Enter to inject a fault. The monitor should receive `health=KO`
-and Central should acknowledge `state=fault`. Type `r` and press Enter to repair;
-the monitor should return to `health=OK` and Central should acknowledge
-`state=healthy`.
+Use the same project name (`ws-1`) in both terminals so they join the same network.
+`--use-aliases` makes Engine reachable as `engine`; Monitor's startup command
+resolves that name to the IPv4 address its executable needs. `--no-deps` ensures
+a command does not launch the other application. See the
+[Compose run reference](https://docs.docker.com/reference/cli/docker/compose/run/).
+Omit `--build` on later launches to reuse existing images.
 
-Type `s` to start a manual irrigation when activated, and `e` to end it. Manual
-starts publish `ws-start-conf` with `station_id` and `operation_code: null`;
-Central assigns the operation code internally. A Central `BLOCK` ends the current
-irrigation and prevents further manual starts. Only an external `ACTIVATE` can
-clear that block; it does not resume the old irrigation.
+Compose accepts `WS_ID`, `QUEUE_ENDPOINT`, `CENTRAL_HOSTNAME`, and `CENTRAL_PORT`
+from the shell or an explicit `--env-file`. To run station 2, add `-e WS_ID=2`
+before `monitor` in its command. For multiple simultaneous stations, use a
+different project name in both terminals and unique container names for each
+pair. Each project has its own network, `engine-state` volume, and `station-logs`
+volume. Choose one workflow for a station; the direct and Compose workflows use
+different volume names.
 
-Repair returns Engine to idle. Monitor sends a new NAP activation and waits for
-Central's acknowledgement before sending HCP `AC`. With Monitor stopped, Engine
-stops watering, rejects starts, and withholds Kafka output until reactivated.
+### Stop, restart, or leave a terminal
 
-Detach with `Ctrl+P`, then `Ctrl+Q` to leave the engine running. The engine also
-accepts `q` to exit; avoid it unless testing shutdown.
+Both workflows use the same controls:
 
-To test loss of the engine connection and subsequent recovery:
+- Type `quit` and press Enter to stop the application in that terminal.
+- Press `Ctrl+P`, then `Ctrl+Q` to detach and leave the container running.
+- Run `docker attach wm-engine` or `docker attach wm-monitor` to reconnect to a
+  running container. Type `status` and press Enter to show its menu again.
+- Restart exited containers with the following commands, one per terminal.
 
-```bash
-docker stop wm-engine
-docker start wm-engine
+```sh
+# Terminal 1
+docker start -ai wm-engine
 ```
 
-Allow the monitor to detect the failure before restarting the engine. While the
-engine is stopped, the monitor reports KO to Central and retries the engine
-connection. After restart it should reconnect and report OK.
+```sh
+# Terminal 2
+docker start -ai wm-monitor
+```
 
-`[Central][NAP] ... status acknowledged: state=fault reason=connect: ... Connection refused`
-means Central accepted a report of an engine connection failure. The `reason`
-text is a local diagnostic; the NAP status frame carries `KO`, not that text.
-Actual Central reporting failures are logged as `status send failed` or
-`status acknowledgement failed`.
+Restarting reuses the container's original configuration. To rebuild or change
+environment settings, stop and remove that container before repeating its launch
+command. Persistent volumes retain logs and recovery data. After recreating
+Engine, restart Monitor so it resolves the new address in the Compose workflow;
+in the direct workflow, recreate Monitor with the updated IP.
+
+### Logs and recovery data
+
+Menus and serious errors appear in each application's terminal. Routine activity
+is written to files in the mounted volumes:
+
+| Data | Container path |
+| ---- | -------------- |
+| Engine log | `/var/log/wm-ws/wm-ws-engine.log` |
+| Monitor log | `/var/log/wm-ws/wm-ws-monitor.log` |
+| Engine recovery data | `/var/lib/wm-ws/state.jsonl.0` and `.1` |
+
+From another terminal, follow either activity log while its container is running:
+
+```sh
+docker exec wm-engine tail -f /var/log/wm-ws/wm-ws-engine.log
+docker exec wm-monitor tail -f /var/log/wm-ws/wm-ws-monitor.log
+```
+
+Run one command at a time, or use separate terminals. `Ctrl+C` stops following the
+log without stopping the application. `docker logs` shows captured terminal
+output, including menus and fatal errors.
+
+### Test faults and recovery
+
+Use Engine's menu to simulate a fault with `fault` and repair it with `repair`.
+Monitor should show the fault and report it to Central. After repair, Monitor
+requests a fresh NAP activation from Central before sending HCP `AC` to Engine.
+Engine stays idle until you start watering again.
+
+Use `start` and `stop` for manual irrigation. Manual starts publish `ws-start-conf`
+with `station_id` and `operation_code: null`; Central assigns the operation code
+internally. A Central `BLOCK` stops irrigation and prevents manual starts. Only
+an external `ACTIVATE` clears that block; it does not resume the old irrigation.
+
+To test Monitor loss, type `quit` in its terminal. Engine must stop watering,
+reject starts, and withhold Kafka output. Run `docker start -ai wm-monitor` in the
+Monitor terminal and wait for activation before starting irrigation again.
+
+To test Engine loss, type `quit` in its terminal. Let Monitor detect the lost
+connection and report it to Central, then run `docker start -ai wm-engine` in the
+Engine terminal. Monitor should reconnect automatically.
+
+A log entry such as `status acknowledged: state=fault reason=connect: ...
+Connection refused` means Central accepted Monitor's report that Engine could
+not be reached. The diagnostic describes the Engine connection; the NAP report
+carries `KO`. Failures to report to Central are logged as `status send failed`
+or `status acknowledgement failed`.
 
 ## Executable parameters
 
@@ -289,55 +290,49 @@ all timeout, interval, and retry values must be positive milliseconds.
 
 ### Engine: WM_WS_E
 
-| Parameter               | CLI default           | Purpose                                                                                         |
-| ----------------------- | --------------------- | ----------------------------------------------------------------------------------------------- |
-| `--help`              | â€”                | Print available options and exit.                                                               |
-| `--queue HOST:PORT`   | Required              | Kafka bootstrap endpoint; must be nonempty.                                                     |
-| `--hcp-port PORT`     | `8080`              | Local TCP port for monitor health connections, listening on all IPv4 interfaces.                |
-| `--hcp-timeout-ms MS` | `2000`              | HCP receive/send deadline.                                                                      |
+| Parameter               | CLI default                 | Purpose                                                                                         |
+| ----------------------- | --------------------------- | ----------------------------------------------------------------------------------------------- |
+| `--help`              | â€”                      | Print available options and exit.                                                               |
+| `--queue HOST:PORT`   | Required                    | Kafka bootstrap endpoint; must be nonempty.                                                     |
+| `--hcp-port PORT`     | `8080`                    | Local TCP port for monitor health connections, listening on all IPv4 interfaces.                |
+| `--hcp-timeout-ms MS` | `2000`                    | HCP receive/send deadline.                                                                      |
 | `--state-file PATH`   | `state/wm-ws-state.jsonl` | Base path for two synced checkpoint files (`.0` and `.1`); use a separate path per station. |
-| `--log-file PATH`     | `log/wm-ws-engine.log` | Append activity logs here; create parent directories as needed. |
+| `--log-file PATH`     | `log/wm-ws-engine.log`    | Append activity logs here; create parent directories as needed.                                 |
 
-Copy-and-paste example with every operational parameter:
+Native example with every operational parameter (run from the repository root):
 
-```bash
-docker run --rm -it --network wm-network wm-engine ./build/WM_WS_E --queue iriguchi.proxy.rlwy.net:37040 --hcp-port 8080 --hcp-timeout-ms 2000
+```sh
+./WM_WS/WM_WS_E/build/WM_WS_E --queue iriguchi.proxy.rlwy.net:37040 --hcp-port 8080 --hcp-timeout-ms 2000 --state-file state/wm-ws-state.jsonl --log-file log/wm-ws-engine.log
 ```
-
-This launches an additional engine; stop it before continuing tests that assume
-only one engine. The monitor must target this container's IP to test it.
 
 ### Monitor: WM_WS_M
 
-| Parameter                       | CLI default | Purpose                                                                    |
-| ------------------------------- | ----------- | -------------------------------------------------------------------------- |
-| `--help`                      | â€”      | Print available options and exit.                                          |
-| `--ws-id ID`                  | Required    | Station ID: 1â€“64 letters, digits, hyphens, or underscores.            |
-| `--engine-ip IPV4`            | Required    | Engine address in dotted-decimal IPv4 format. Hostnames are not supported. |
-| `--engine-port PORT`          | `8080`    | Engine HCP listening port.                                                 |
-| `--hcp-timeout-ms MS`         | `2000`    | HCP connect/send/response deadline.                                        |
-| `--hcp-retry-ms MS`           | `1000`    | Delay between engine connection attempts.                                  |
-| `--nap-interval-ms MS`        | `1000`    | Interval for healthy reports and retries of unacknowledged fault reports.  |
-| `--nap-timeout-ms MS`         | `2000`    | NAP connect/send/response deadline.                                        |
-| `--central-hostname HOST`     | Required    | Nonempty Central hostname; resolved to IPv4.                               |
-| `--central-port PORT`         | Required    | Central NAP TCP port.                                                      |
-| `--monitor-location LOCATION` | `spain`   | Registration location; nonempty and must not contain `#`.                |
-| `--log-file PATH`             | `log/wm-ws-monitor.log` | Append activity logs here; create parent directories as needed. |
+| Parameter                       | CLI default               | Purpose                                                                    |
+| ------------------------------- | ------------------------- | -------------------------------------------------------------------------- |
+| `--help`                      | â€”                    | Print available options and exit.                                          |
+| `--ws-id ID`                  | Required                  | Station ID: 1â€“64 letters, digits, hyphens, or underscores.            |
+| `--engine-ip IPV4`            | Required                  | Engine address in dotted-decimal IPv4 format. Hostnames are not supported. |
+| `--engine-port PORT`          | `8080`                  | Engine HCP listening port.                                                 |
+| `--hcp-timeout-ms MS`         | `2000`                  | HCP connect/send/response deadline.                                        |
+| `--hcp-retry-ms MS`           | `1000`                  | Delay between engine connection attempts.                                  |
+| `--nap-interval-ms MS`        | `1000`                  | Interval for healthy reports and retries of unacknowledged fault reports.  |
+| `--nap-timeout-ms MS`         | `2000`                  | NAP connect/send/response deadline.                                        |
+| `--central-hostname HOST`     | Required                  | Nonempty Central hostname; resolved to IPv4.                               |
+| `--central-port PORT`         | Required                  | Central NAP TCP port.                                                      |
+| `--monitor-location LOCATION` | `spain`                 | Registration location; nonempty and must not contain `#`.                |
+| `--log-file PATH`             | `log/wm-ws-monitor.log` | Append activity logs here; create parent directories as needed.            |
 
-To run with every operational parameter, stop the existing monitor first. This
-example reuses the engine started in the bridge network section:
+Native example with every operational parameter, with Engine on the same host:
 
-```bash
-docker stop wm-monitor
-ENGINE_IP=$(docker inspect -f '{{(index .NetworkSettings.Networks "wm-network").IPAddress}}' wm-engine)
-docker run --rm -it --network wm-network wm-monitor ./build/WM_WS_M --ws-id 1 --engine-ip "$ENGINE_IP" --engine-port 8080 --hcp-timeout-ms 2000 --hcp-retry-ms 1000 --nap-interval-ms 1000 --nap-timeout-ms 2000 --central-hostname altaria.proxy.rlwy.net --central-port 40931 --monitor-location spain
+```sh
+./WM_WS/WM_WS_M/build/WM_WS_M --ws-id 1 --engine-ip 127.0.0.1 --engine-port 8080 --hcp-timeout-ms 2000 --hcp-retry-ms 1000 --nap-interval-ms 1000 --nap-timeout-ms 2000 --central-hostname altaria.proxy.rlwy.net --central-port 40931 --monitor-location spain --log-file log/wm-ws-monitor.log
 ```
 
-Print executable help without connecting to the services:
+Print executable help inside running containers from either Docker workflow:
 
-```bash
-docker run --rm wm-engine ./build/WM_WS_E --help
-docker run --rm wm-monitor ./build/WM_WS_M --help
+```sh
+docker exec wm-engine ./build/WM_WS_E --help
+docker exec wm-monitor ./build/WM_WS_M --help
 ```
 
 An explicit executable command after the image name replaces the entire Docker
@@ -350,17 +345,17 @@ Each connection parameter below is both a build argument (`--build-arg`) and an
 environment variable (`docker run -e`). A build argument changes the image's
 default; a runtime environment variable overrides that default for one container.
 
-| Image          | Parameter            | Default                           | Executable argument    |
-| -------------- | -------------------- | --------------------------------- | ---------------------- |
-| `wm-engine`  | `QUEUE_ENDPOINT`   | `iriguchi.proxy.rlwy.net:37040` | `--queue`            |
-| `wm-engine`  | `STATE_FILE`       | `/var/lib/wm-ws/state.jsonl`    | `--state-file`       |
-| `wm-engine`  | `LOG_FILE`         | `/var/log/wm-ws/wm-ws-engine.log` | `--log-file`      |
-| `wm-monitor` | `LOG_FILE`         | `/var/log/wm-ws/wm-ws-monitor.log` | `--log-file`     |
-| `wm-monitor` | `WS_ID`            | `1`                             | `--ws-id`            |
-| `wm-monitor` | `ENGINE_IP`        | `127.0.0.1`                     | `--engine-ip`        |
-| `wm-monitor` | `ENGINE_PORT`      | `8080`                          | `--engine-port`      |
-| `wm-monitor` | `CENTRAL_HOSTNAME` | `altaria.proxy.rlwy.net`        | `--central-hostname` |
-| `wm-monitor` | `CENTRAL_PORT`     | `40931`                         | `--central-port`     |
+| Image          | Parameter            | Default                              | Executable argument    |
+| -------------- | -------------------- | ------------------------------------ | ---------------------- |
+| `wm-engine`  | `QUEUE_ENDPOINT`   | `iriguchi.proxy.rlwy.net:37040`    | `--queue`            |
+| `wm-engine`  | `STATE_FILE`       | `/var/lib/wm-ws/state.jsonl`       | `--state-file`       |
+| `wm-engine`  | `LOG_FILE`         | `/var/log/wm-ws/wm-ws-engine.log`  | `--log-file`         |
+| `wm-monitor` | `LOG_FILE`         | `/var/log/wm-ws/wm-ws-monitor.log` | `--log-file`         |
+| `wm-monitor` | `WS_ID`            | `1`                                | `--ws-id`            |
+| `wm-monitor` | `ENGINE_IP`        | `127.0.0.1`                        | `--engine-ip`        |
+| `wm-monitor` | `ENGINE_PORT`      | `8080`                             | `--engine-port`      |
+| `wm-monitor` | `CENTRAL_HOSTNAME` | `altaria.proxy.rlwy.net`           | `--central-hostname` |
+| `wm-monitor` | `CENTRAL_PORT`     | `40931`                            | `--central-port`     |
 
 The remaining CLI options have no Docker environment-variable mapping. To change
 them, use an explicit executable command as shown above.
@@ -439,12 +434,25 @@ Boost and GoogleTest fallbacks as the applications.
 
 ## Cleanup
 
-Stop following or attaching to the containers before removing them. These commands
-remove only the two named test containers and their network; images and the station
-state volume are retained.
+Stop and remove the two containers when testing is finished. These commands work
+for either Docker workflow and keep images, logs, and recovery volumes:
 
-```bash
+```sh
 docker stop wm-monitor wm-engine
 docker rm wm-monitor wm-engine
+```
+
+After removing both containers, remove the network for your chosen workflow:
+
+```sh
+# Direct docker run workflow
 docker network rm wm-network
 ```
+
+```sh
+# Compose run workflow with project ws-1
+docker network rm ws-1_default
+```
+
+Skip `docker stop` for containers that have already exited. Leave volumes in place
+to preserve station recovery data and logs for the next run.
