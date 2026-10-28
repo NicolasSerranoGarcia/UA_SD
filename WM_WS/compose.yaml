@@ -17,10 +17,6 @@ services:
     build:
       context: .
       dockerfile: WM_WS_M/Dockerfile
-    depends_on:
-      engine:
-        condition: service_started
-        restart: true
     environment:
       WS_ID: "${WS_ID:-1}"
       ENGINE_PORT: "8080"
