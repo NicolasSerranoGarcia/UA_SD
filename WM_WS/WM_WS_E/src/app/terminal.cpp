@@ -6,10 +6,49 @@
 #include "logging.hpp"
 #include <iomanip>
 #include <iostream>
+#include <ninttp/platform_traits.hpp>
 #include <syncstream>
+#if NINTTP_PLATFORM_WINDOWS == 1
+#include <windows.h>
+#elif NINTTP_PLATFORM_UNIX == 1
+#include <unistd.h>
+#endif
 
 namespace app {
 namespace {
+
+bool enableCursorUpdates() {
+#if NINTTP_PLATFORM_WINDOWS == 1
+    const auto output = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD mode{};
+    return GetConsoleMode(output, &mode) &&
+           SetConsoleMode(output, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+#elif NINTTP_PLATFORM_UNIX == 1
+    return isatty(STDOUT_FILENO) == 1;
+#else
+    return false;
+#endif
+}
+
+void measurements(std::ostream &output, const Engine::Reading &reading) {
+    output << std::fixed << std::setprecision(2)
+           << "Flow: " << reading.flowLitersPerMinute << " L/min"
+           << " | Water delivered: " << reading.volumeLiters << " L"
+           << " | Watering time: " << reading.elapsedSeconds << " s";
+}
+
+void refreshMeasurements(const Engine &engine, bool cursorUpdates) {
+    std::osyncstream output(std::cout);
+    // Update the measurement row above the prompt without moving the typing cursor.
+    if (cursorUpdates)
+        output << "\x1b" "7\x1b[1A\r\x1b[2K";
+    measurements(output, engine.reading());
+    if (cursorUpdates)
+        output << "\x1b" "8";
+    else
+        output << '\n';
+    output << std::flush;
+}
 
 std::string state(const Engine &engine) {
     if (!engine.isMonitorConnected()) return "Monitor is disconnected. Irrigation is unavailable.";
@@ -26,10 +65,6 @@ void show(const Options &options, const Engine &engine, const kafka::Service &ka
            << "Station: " << (id.empty() ? "waiting for Monitor to provide the station ID" : id)
            << "\nState: " << state(engine)
            << "\nActivation: " << (engine.isActivated() ? "Active" : "Inactive - activate the station before starting")
-           << std::fixed << std::setprecision(2)
-           << "\nFlow: " << reading.flowLitersPerMinute << " L/min"
-           << " | Water delivered: " << reading.volumeLiters << " L"
-           << " | Watering time: " << reading.elapsedSeconds << " s"
            << "\nMessage broker (Kafka): " << options.queueEndpoint;
     if (kafka.failureReason())
         output << "\nMessaging is unavailable. Check the activity log and the error shown on screen.";
@@ -44,7 +79,10 @@ void show(const Options &options, const Engine &engine, const kafka::Service &ka
            << "\n  [Q / 0] Quit Engine"
            << "\n\nChoose a letter or number and press Enter."
            << "\nYou can also type: start, stop, fault, repair, status, help, quit."
-           << "\nWhen attached to Docker, press Ctrl+P then Ctrl+Q to leave Engine running.\n" << std::flush;
+           << "\nWhen attached to Docker, press Ctrl+P then Ctrl+Q to leave Engine running."
+           << "\nMeasurements:\n";
+    measurements(output, reading);
+    output << "\n> " << std::flush;
 }
 
 } // namespace
@@ -53,8 +91,10 @@ void readConsole(std::stop_token stop, Engine &engine, kafka::Service &kafka,
                  const Options &options, std::stop_source &shutdown, std::atomic<bool> &failed) {
     try {
         console::Input input;
+        const bool cursorUpdates = enableCursorUpdates();
         show(options, engine, kafka);
         auto previousState = state(engine);
+        auto nextRefresh = std::chrono::steady_clock::now() + std::chrono::seconds{1};
         while (!stop.stop_requested() && !shutdown.stop_requested()) {
             const auto command = input.read(std::chrono::milliseconds{100});
             if (!command)
@@ -64,10 +104,15 @@ void readConsole(std::stop_token stop, Engine &engine, kafka::Service &kafka,
                 return;
             }
             if (command->kind == console::Kind::Waiting) {
+                const auto now = std::chrono::steady_clock::now();
                 const auto current = state(engine);
                 if (current != previousState) {
                     previousState = current;
                     show(options, engine, kafka);
+                    nextRefresh = now + std::chrono::seconds{1};
+                } else if (engine.isRunning() && now >= nextRefresh) {
+                    refreshMeasurements(engine, cursorUpdates);
+                    nextRefresh = now + std::chrono::seconds{1};
                 }
                 continue;
             }
@@ -98,6 +143,7 @@ void readConsole(std::stop_token stop, Engine &engine, kafka::Service &kafka,
             }
             previousState = state(engine);
             show(options, engine, kafka);
+            nextRefresh = std::chrono::steady_clock::now() + std::chrono::seconds{1};
         }
     } catch (const std::exception &error) {
         failed.store(true);

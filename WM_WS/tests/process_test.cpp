@@ -5,6 +5,9 @@
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
+#include <iterator>
+#include <regex>
+#include <set>
 #include <string>
 #include <thread>
 
@@ -35,6 +38,78 @@ TEST(Process, EngineMenuKeepsRoutineLogsInFileAndQuitsWithOpenStdin) {
         EXPECT_NE(engine.output().find(action), std::string::npos) << action;
     EXPECT_EQ(engine.output().find("[Engine][Kafka]"), std::string::npos);
     EXPECT_NE(log.read().find("[Engine][Kafka]"), std::string::npos);
+}
+
+TEST(Process, EngineRefreshesWaterMeasurementsWithoutAnotherCommand) {
+    TemporaryLog log;
+    const auto state = log.path.string() + ".state";
+    struct Cleanup {
+        std::string path;
+        ~Cleanup() {
+            std::error_code ignored;
+            std::filesystem::remove(path + ".0", ignored);
+            std::filesystem::remove(path + ".1", ignored);
+        }
+    } cleanup{state};
+    std::uint16_t port;
+    { ts::Server reservation; port = reservation.port(); }
+    ts::Process engine(ts::enginePath, {"--queue", "127.0.0.1:9092", "--hcp-port",
+        std::to_string(port), "--log-file", log.path.string(), "--state-file", state}, true);
+    boost::asio::io_context context;
+    ts::Tcp::socket health(context);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+    for (;;) {
+        boost::system::error_code error;
+        health.connect({boost::asio::ip::address_v4::loopback(), port}, error);
+        if (!error)
+            break;
+        ASSERT_LT(std::chrono::steady_clock::now(), deadline);
+        health.close();
+        std::this_thread::sleep_for(std::chrono::milliseconds{20});
+    }
+    health.non_blocking(true);
+    ts::send(health, "ID 1\nAC");
+    ASSERT_EQ(ts::receive(health, 4), "OKOK");
+    while (!std::filesystem::exists(state + ".1")) {
+        ASSERT_LT(std::chrono::steady_clock::now(), deadline);
+        std::this_thread::sleep_for(std::chrono::milliseconds{20});
+    }
+    engine.sendInput("start\n");
+    for (int count = 0; count < 5; ++count) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{600});
+        ts::send(health, "HC");
+        ASSERT_EQ(ts::receive(health, 2), "OK");
+    }
+    health.close();
+    engine.sendInput("quit\n");
+    const auto result = engine.waitFor(std::chrono::seconds{5});
+    ASSERT_TRUE(result) << engine.errors();
+    EXPECT_EQ(*result, 0) << engine.errors();
+    const std::regex measurement{R"(Water delivered: ([0-9.]+) L \| Watering time: ([0-9.]+) s)"};
+    double previousTime = 0;
+    double previousWater = 0;
+    int updates = 0;
+    const auto &output = engine.output();
+    for (std::sregex_iterator entry(output.begin(), output.end(), measurement), end; entry != end; ++entry) {
+        const double water = std::stod((*entry)[1].str());
+        const double time = std::stod((*entry)[2].str());
+        if (time > previousTime + 0.5 && water > previousWater) {
+            ++updates;
+            previousTime = time;
+            previousWater = water;
+        }
+    }
+    EXPECT_GE(updates, 2) << output;
+    const std::regex flow{R"(Flow: ([0-9.]+) L/min)"};
+    std::set<std::string> wateringFlows;
+    for (std::sregex_iterator entry(output.begin(), output.end(), flow), end; entry != end; ++entry)
+        if (std::stod((*entry)[1].str()) > 0)
+            wateringFlows.insert((*entry)[1].str());
+    EXPECT_GT(wateringFlows.size(), 1u) << output;
+    const std::regex menu{R"(Watering station \| Engine)"};
+    EXPECT_GT(std::distance(std::sregex_iterator(output.begin(), output.end(), measurement), std::sregex_iterator{}),
+              std::distance(std::sregex_iterator(output.begin(), output.end(), menu), std::sregex_iterator{}));
+    EXPECT_EQ(output.find('\x1b'), std::string::npos); // Pipes receive plain text.
 }
 
 TEST(Process, MonitorMenuIsVisibleAndCanQuitDuringStartup) {
