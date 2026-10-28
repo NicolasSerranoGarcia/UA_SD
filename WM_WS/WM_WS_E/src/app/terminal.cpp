@@ -90,7 +90,7 @@ void show(const Options &options, const Engine &engine, const kafka::Service &ka
 void readConsole(std::stop_token stop, Engine &engine, kafka::Service &kafka,
                  const Options &options, std::stop_source &shutdown, std::atomic<bool> &failed) {
     try {
-        console::Input input;
+        console::Input input(console::inputEcho());
         const bool cursorUpdates = enableCursorUpdates();
         show(options, engine, kafka);
         auto previousState = state(engine);

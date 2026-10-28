@@ -44,7 +44,7 @@ void show(const Options &options, const Status &status) {
            << "\n\nChoose a letter or number and press Enter."
            << "\nYou can also type: status, help, quit."
            << "\nUse the Engine menu to start or stop watering, simulate a fault, or repair it."
-           << "\nWhen attached to Docker, press Ctrl+P then Ctrl+Q to leave Monitor running.\n" << std::flush;
+           << "\nWhen attached to Docker, press Ctrl+P then Ctrl+Q to leave Monitor running.\n> " << std::flush;
 }
 
 } // namespace
@@ -81,7 +81,7 @@ int runTerminal(const Options &options) {
         }
         finished.store(true);
     });
-    console::Input input;
+    console::Input input(console::inputEcho());
     bool inputOpen = true;
     while (!finished.load()) {
         if (!inputOpen) {

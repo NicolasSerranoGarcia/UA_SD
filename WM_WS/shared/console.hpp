@@ -3,7 +3,10 @@
 #include "poll/poll.hpp"
 
 #include <cctype>
+#include <iostream>
 #include <string>
+#include <string_view>
+#include <syncstream>
 
 namespace console {
 
@@ -13,11 +16,25 @@ struct Command {
     std::string text;
 };
 
+inline std::ostream *inputEcho() {
+#if NINTTP_PLATFORM_WINDOWS == 1
+    DWORD inputMode{}, outputMode{};
+    // ReadConsoleInput reads key events without the console's usual line echo.
+    if (GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &inputMode) &&
+        GetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), &outputMode))
+        return &std::cout;
+#endif
+    return nullptr;
+}
+
 // Read complete commands without blocking cooperative shutdown or mixing readers.
 class Input {
   public:
+    explicit Input(std::ostream *echo = nullptr) : echo_(echo) {}
+
     Command feed(char character) {
         if (character == '\r' || character == '\n') {
+            echo("\n");
             if (overflow_) {
                 overflow_ = false;
                 line_.clear();
@@ -37,12 +54,15 @@ class Input {
         if (overflow_)
             return {};
         if (character == '\b' || character == '\x7f') {
-            if (!line_.empty())
+            if (!line_.empty()) {
                 line_.pop_back();
+                echo("\b \b");
+            }
         } else if (line_.size() >= 64) {
             overflow_ = true;
         } else if (static_cast<unsigned char>(character) >= ' ') {
             line_ += character;
+            echo(std::string_view{&character, 1});
         }
         return {};
     }
@@ -59,6 +79,12 @@ class Input {
     }
 
   private:
+    void echo(std::string_view text) {
+        if (echo_)
+            std::osyncstream(*echo_) << text << std::flush;
+    }
+
+    std::ostream *echo_;
     std::string line_;
     bool overflow_ = false;
 };

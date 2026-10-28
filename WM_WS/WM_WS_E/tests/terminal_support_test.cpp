@@ -28,6 +28,35 @@ TEST(ConsoleInput, OverlongInputIsDiscardedRatherThanExecutingItsSuffix) {
     EXPECT_EQ(input.feed('\n').text, "p");
 }
 
+TEST(ConsoleInput, EchoesTypingAndBackspaceBeforeEnter) {
+    std::ostringstream terminal;
+    console::Input input(&terminal);
+    (void)input.feed('\b');
+    EXPECT_TRUE(terminal.str().empty());
+    for (char letter : std::string{"StatuX"})
+        EXPECT_EQ(input.feed(letter).kind, console::Kind::Waiting);
+    EXPECT_EQ(terminal.str(), "StatuX");
+    (void)input.feed('\b');
+    (void)input.feed('s');
+    EXPECT_EQ(terminal.str(), "StatuX\b \bs");
+    const auto command = input.feed('\r');
+    EXPECT_EQ(command.kind, console::Kind::Ready);
+    EXPECT_EQ(command.text, "status");
+    EXPECT_EQ(terminal.str(), "StatuX\b \bs\n");
+}
+
+TEST(ConsoleInput, DoesNotEchoWhenNoEchoStreamIsProvided) {
+    std::ostringstream terminal;
+    struct Restore {
+        std::streambuf *previous;
+        ~Restore() { std::cout.rdbuf(previous); }
+    } restore{std::cout.rdbuf(terminal.rdbuf())};
+    console::Input input;
+    for (char letter : std::string{"status\n"})
+        (void)input.feed(letter);
+    EXPECT_TRUE(terminal.str().empty());
+}
+
 TEST(FileLogging, FlushesRoutineMessagesAndMirrorsOnlyFatalErrorsToTerminal) {
     const auto path = std::filesystem::temp_directory_path() /
         ("wm-logging-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".log");
