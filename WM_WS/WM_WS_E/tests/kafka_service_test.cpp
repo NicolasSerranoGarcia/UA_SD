@@ -97,7 +97,8 @@ TEST(KafkaService, RoutesRecordsAndDefersFinishUntilMonitorRecovery) {
         ASSERT_EQ(receive("ws-start-conf", 1).at("status").as_string(), "OK");
         const auto sample = receive("telemetry");
         EXPECT_EQ(sample.size(), 3);
-        EXPECT_EQ(sample.at("flux_l_min").to_number<double>(), 40.0);
+        EXPECT_GE(sample.at("flux_l_min").to_number<double>(), 39.2 - 0.00001);
+        EXPECT_LE(sample.at("flux_l_min").to_number<double>(), 40);
         ASSERT_EQ(sample.at("operator_id").as_int64(), 7);
         EXPECT_TRUE(engine.isRunning());
         engine.setMonitorConnected(false);

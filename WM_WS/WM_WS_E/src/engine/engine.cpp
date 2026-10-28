@@ -218,7 +218,7 @@ bool Engine::checkHealth() {
 
 internal::units::liters_min Engine::measureFlow() const {
     std::lock_guard lock(mutex_);
-    return internal::FlowMeter::measure(valve);
+    return static_cast<internal::units::liters_min>(readingUnlocked().flowLitersPerMinute);
 }
 
 void Engine::injectFaultUnlocked() {
@@ -233,10 +233,10 @@ void Engine::injectFaultUnlocked() {
 Engine::Reading Engine::readingUnlocked() const {
     if (state != State::Watering)
         return finalReading_;
-    const double elapsed = std::chrono::duration<double>(
-        std::min(std::chrono::steady_clock::now(), deadline) - started_).count();
-    const double flow = internal::FlowMeter::measure(valve);
-    return {flow, flow * std::max(0.0, elapsed) / 60.0, std::max(0.0, elapsed)};
+    const double elapsed = std::max(0.0, std::chrono::duration<double>(
+        std::min(std::chrono::steady_clock::now(), deadline) - started_).count());
+    return {internal::FlowMeter::measure(valve, elapsed),
+            internal::FlowMeter::volume(valve, elapsed), elapsed};
 }
 
 Engine::Reading Engine::reading() const {

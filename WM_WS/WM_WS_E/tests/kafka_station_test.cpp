@@ -85,8 +85,11 @@ TEST_F(KafkaStation, TelemetryUsesReadmeFieldsAndOwnerModuloRouting) {
     const auto &event = station.events().front();
     EXPECT_EQ(event.topic, "telemetry");
     EXPECT_EQ(event.recipient, "7");
-    const boost::json::object expected{{"station_id", 1}, {"flux_l_min", 40.0}, {"operator_id", 7}};
-    EXPECT_EQ(event.value, expected);
+    EXPECT_EQ(event.value.size(), 3);
+    EXPECT_EQ(event.value.at("station_id").to_number<int>(), 1);
+    EXPECT_EQ(event.value.at("operator_id").to_number<int>(), 7);
+    EXPECT_GE(event.value.at("flux_l_min").to_number<double>(), 39.2 - 0.00001);
+    EXPECT_LE(event.value.at("flux_l_min").to_number<double>(), 40);
 }
 
 TEST_F(KafkaStation, NullOrOmittedDurationMeansIndefiniteAndDuplicateDoesNotRestart) {
