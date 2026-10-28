@@ -70,9 +70,16 @@ Process::Process(const std::filesystem::path &executable, const std::vector<std:
     : child_(context_, executable.native(), arguments,
              processStdio(input_, outputPipe_, errorPipe_, captureOutput)) {
     if (captureOutput) {
-        boost::asio::async_read(outputPipe_, boost::asio::dynamic_buffer(output_), [](auto, auto) {});
-        boost::asio::async_read(errorPipe_, boost::asio::dynamic_buffer(errors_), [](auto, auto) {});
+        capture(outputPipe_, output_, outputBuffer_);
+        capture(errorPipe_, errors_, errorBuffer_);
     }
+}
+
+void Process::capture(boost::asio::readable_pipe &pipe, std::string &text, std::array<char, 4096> &buffer) {
+    pipe.async_read_some(boost::asio::buffer(buffer), [this, &pipe, &text, &buffer](auto error, auto size) {
+        text.append(buffer.data(), size);
+        if (!error) capture(pipe, text, buffer);
+    });
 }
 
 Process::~Process() {
@@ -118,9 +125,9 @@ std::optional<int> Process::waitFor(std::chrono::milliseconds timeout) {
     return child_.exit_code();
 }
 
-Server::Server(bool wildcard)
+Server::Server(bool wildcard, std::uint16_t port)
     : listener_(context_, {wildcard ? boost::asio::ip::address_v4::any()
-                                  : boost::asio::ip::address_v4::loopback(), 0}) {
+                                  : boost::asio::ip::address_v4::loopback(), port}) {
     listener_.non_blocking(true);
 }
 
@@ -142,10 +149,14 @@ Tcp::socket Server::accept(std::chrono::milliseconds timeout) {
     }
 }
 
-Engine::Engine()
+Engine::Engine(const std::vector<std::string> &arguments, bool captureOutput)
     : port_(unusedPort(context_)),
-      process_(enginePath, {"--queue", "127.0.0.1:9092", "--hcp-port", std::to_string(port_),
-                            "--hcp-timeout-ms", "2000"}),
+      process_(enginePath, [&] {
+          std::vector<std::string> options{"--queue", "127.0.0.1:9092", "--hcp-port", std::to_string(port_),
+                                           "--hcp-timeout-ms", "2000"};
+          options.insert(options.end(), arguments.begin(), arguments.end());
+          return options;
+      }(), captureOutput),
       socket_(connect(context_, port_)) {}
 
 Tcp::socket Engine::reconnect() { return connect(context_, port_); }

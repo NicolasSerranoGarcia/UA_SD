@@ -6,6 +6,7 @@
 #include <boost/asio/writable_pipe.hpp>
 #include <boost/process/v2/process.hpp>
 #include <chrono>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -38,18 +39,21 @@ class Process {
     const std::string &errors() const { return errors_; }
 
   private:
+    void capture(boost::asio::readable_pipe &pipe, std::string &text, std::array<char, 4096> &buffer);
     boost::asio::io_context context_;
     boost::asio::writable_pipe input_{context_};
     boost::asio::readable_pipe outputPipe_{context_};
     boost::asio::readable_pipe errorPipe_{context_};
     std::string output_;
     std::string errors_;
+    std::array<char, 4096> outputBuffer_{};
+    std::array<char, 4096> errorBuffer_{};
     boost::process::v2::process child_;
 };
 
 class Server {
   public:
-    explicit Server(bool wildcard = false);
+    explicit Server(bool wildcard = false, std::uint16_t port = 0);
     std::uint16_t port() const;
     Tcp::socket accept(std::chrono::milliseconds timeout = std::chrono::seconds{3});
 
@@ -60,7 +64,7 @@ class Server {
 
 class Engine {
   public:
-    Engine();
+    explicit Engine(const std::vector<std::string> &arguments = {}, bool captureOutput = false);
     Tcp::socket reconnect();
     std::uint16_t port() const { return port_; }
     Process &process() { return process_; }

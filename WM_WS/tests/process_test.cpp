@@ -6,6 +6,7 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <iterator>
+#include <memory>
 #include <regex>
 #include <set>
 #include <string>
@@ -23,6 +24,91 @@ struct TemporaryLog {
         return {std::istreambuf_iterator<char>(stream), {}};
     }
 };
+
+struct TemporaryState {
+    std::filesystem::path path = std::filesystem::temp_directory_path() /
+        ("wm-recovery-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    ~TemporaryState() {
+        std::error_code ignored;
+        std::filesystem::remove(path.string() + ".0", ignored);
+        std::filesystem::remove(path.string() + ".1", ignored);
+    }
+};
+
+TEST(Process, EngineRecoversExposedMeasurementsAfterHardKill) {
+    TemporaryLog log;
+    TemporaryState state;
+    const std::vector<std::string> arguments{"--log-file", log.path.string(), "--state-file", state.path.string()};
+    double water = 0, elapsed = 0;
+    {
+        ts::Engine station(arguments, true);
+        ts::send(station.socket(), "ID 1\nAC");
+        ASSERT_EQ(ts::receive(station.socket(), 4), "OKOK");
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{6};
+        while (!std::filesystem::exists(state.path.string() + ".1")) {
+            ASSERT_LT(std::chrono::steady_clock::now(), deadline);
+            (void)station.process().waitFor(std::chrono::milliseconds{20});
+        }
+        station.process().sendInput("start\n");
+        const std::regex measurement{R"(Water delivered: ([0-9.]+) L \| Watering time: ([0-9.]+) s)"};
+        while (elapsed < 0.5) {
+            ASSERT_LT(std::chrono::steady_clock::now(), deadline);
+            EXPECT_FALSE(station.process().waitFor(std::chrono::milliseconds{50}));
+            ts::send(station.socket(), "HC");
+            ASSERT_EQ(ts::receive(station.socket(), 2), "OK");
+            const auto &output = station.process().output();
+            for (std::sregex_iterator entry(output.begin(), output.end(), measurement), end; entry != end; ++entry) {
+                water = std::stod((*entry)[1]);
+                elapsed = std::stod((*entry)[2]);
+            }
+        }
+        station.process().stop(); // Abrupt process termination, without the quit/save path.
+    }
+    ts::Engine recovered(arguments);
+    ts::send(recovered.socket(), "ID 1\n");
+    ASSERT_EQ(ts::receive(recovered.socket(), 2), "OK");
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{4};
+    bool found = false;
+    while (!found && std::chrono::steady_clock::now() < deadline) {
+        for (const auto *suffix : {".0", ".1"}) {
+            std::ifstream file(state.path.string() + suffix);
+            const std::string contents{std::istreambuf_iterator<char>(file), {}};
+            if (contents.empty() || contents.back() != '}' || contents.find("ws-finish-conf") == std::string::npos) continue;
+            std::smatch liters, time;
+            if (!std::regex_search(contents, liters, std::regex{R"("total_liters":([0-9.eE+-]+))"}) ||
+                !std::regex_search(contents, time, std::regex{R"("total_time":([0-9.eE+-]+))"})) continue;
+            EXPECT_GE(std::stod(liters[1]) + 0.0051, water);
+            EXPECT_GE(std::stod(time[1]) + 0.0051, elapsed);
+            found = true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{20});
+    }
+    EXPECT_TRUE(found) << "Recovered final summary did not retain the displayed measurements";
+}
+
+TEST(Process, CentralDownAcknowledgementDoesNotConsumeLeakNotification) {
+    ts::Engine station;
+    ts::send(station.socket(), "ID station-1\nAC");
+    ASSERT_EQ(ts::receive(station.socket(), 4), "OKOK");
+    station.process().sendInput("fault\nrepair\n");
+    std::this_thread::sleep_for(std::chrono::milliseconds{150});
+    ts::send(station.socket(), "DCHC");
+    EXPECT_EQ(ts::receive(station.socket(), 4), "OKKO");
+    ts::send(station.socket(), "HC");
+    EXPECT_EQ(ts::receive(station.socket(), 2), "OK");
+}
+
+TEST(Process, ASecondConnectionCannotDisplaceHealthyMonitor) {
+    ts::Engine station;
+    ts::send(station.socket(), "ID station-1\nHC");
+    ASSERT_EQ(ts::receive(station.socket(), 4), "OKOK");
+    auto other = station.reconnect();
+    ts::send(other, "ID another-station\n");
+    station.process().sendInput("status\n");
+    ts::send(station.socket(), "HC");
+    EXPECT_EQ(ts::receive(station.socket(), 2), "OK");
+    EXPECT_TRUE(station.process().running());
+}
 
 TEST(Process, EngineMenuKeepsRoutineLogsInFileAndQuitsWithOpenStdin) {
     TemporaryLog log;
@@ -126,6 +212,7 @@ TEST(Process, MonitorMenuIsVisibleAndCanQuitDuringStartup) {
         EXPECT_NE(monitor.output().find(action), std::string::npos) << action;
     EXPECT_EQ(monitor.output().find("[Central][DNS]"), std::string::npos);
     EXPECT_TRUE(std::filesystem::exists(log.path));
+    EXPECT_NE(monitor.output().find("Central connection:"), std::string::npos);
 }
 
 TEST(Process, FatalBindErrorIsActionableOnTerminalAndRecordedInFile) {
@@ -142,14 +229,95 @@ TEST(Process, FatalBindErrorIsActionableOnTerminalAndRecordedInFile) {
     EXPECT_NE(log.read().find("HCP bind"), std::string::npos);
 }
 
-void acknowledgeNap(ts::Tcp::socket &socket, unsigned int request) {
-    const std::string body = "NAP#1.0#" + std::to_string(request) + "#3#station-1";
+void acknowledgeNap(ts::Tcp::socket &socket, unsigned int request, std::string_view id = "station-1") {
+    const std::string body = "NAP#1.0#" + std::to_string(request) + "#3#" + std::string(id);
     unsigned char checksum = 0;
     for (unsigned char byte : body)
         checksum ^= byte;
     constexpr char hex[] = "0123456789ABCDEF";
     ts::send(socket, body + '#' + hex[checksum >> 4] + hex[checksum & 15] + "#FIN");
 }
+
+class CentralOutageState : public testing::TestWithParam<bool> {};
+
+TEST_P(CentralOutageState, RecoversWithoutRestartingWs) {
+    boost::asio::io_context idleContext;
+    TemporaryLog log;
+    TemporaryState state;
+    const bool blocked = GetParam();
+    if (blocked) {
+        std::ofstream file(state.path.string() + ".1");
+        file << R"({"revision":1,"state":{"version":1,"station_id":"1","blocked":true,"pending":[],"replies":{},"commands":{},"session":null,"intent":null,"volume_l":0,"elapsed_s":0}})";
+    }
+    ts::Engine station({"--log-file", log.path.string(), "--state-file", state.path.string()}, true);
+    station.socket().close();
+    auto central = std::make_unique<ts::Server>();
+    const auto port = central->port();
+    auto arguments = ts::monitorArguments(port, station.port());
+    arguments[1] = "1";
+    arguments.insert(arguments.end(), {"--nap-timeout-ms", "200", "--hcp-retry-ms", "100"});
+    ts::Process monitor(ts::monitorPath, arguments);
+    {
+        auto registration = central->accept();
+        ASSERT_NE(ts::receiveFrame(registration).find("#0#1#spain#"), std::string::npos);
+        acknowledgeNap(registration, 1, "1");
+    }
+    {
+        auto activation = central->accept();
+        ASSERT_NE(ts::receiveFrame(activation).find("#1#1#"), std::string::npos);
+        acknowledgeNap(activation, 1, "1");
+    }
+    auto status = central->accept();
+    unsigned int request = 1;
+    const auto waitForText = [&](std::string_view text, bool acknowledge, std::size_t offset = 0) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{6};
+        while (station.process().output().find(text, offset) == std::string::npos) {
+            ASSERT_LT(std::chrono::steady_clock::now(), deadline) << station.process().output();
+            if (acknowledge) {
+                ASSERT_NE(ts::receiveFrame(status).find("#2#1#OK#"), std::string::npos);
+                acknowledgeNap(status, request++, "1");
+            }
+            EXPECT_FALSE(station.process().waitFor(std::chrono::milliseconds{20}));
+        }
+    };
+    ASSERT_NO_FATAL_FAILURE(waitForText(blocked ? "Central connection: Available" : "Ready to water", true));
+    if (!blocked) {
+        station.process().sendInput("start\n");
+        ASSERT_NO_FATAL_FAILURE(waitForText("Irrigation has started.", true));
+    }
+    const auto outageOffset = station.process().output().size();
+    status.close();
+    status = ts::Tcp::socket(idleContext);
+    central.reset();
+    ASSERT_NO_FATAL_FAILURE(waitForText(blocked ? "Out of Service - blocked by Central; Central is unavailable" :
+                "Watering in progress. Central is unavailable", false, outageOffset));
+    station.process().sendInput("stop\nstart\n");
+    ASSERT_NO_FATAL_FAILURE(waitForText("Irrigation could not start.", false));
+    const auto &output = station.process().output();
+    if (blocked) EXPECT_EQ(output.find("Irrigation has started."), std::string::npos);
+    else EXPECT_EQ(output.find("Irrigation has started.", output.find("Irrigation has started.") + 1), std::string::npos);
+    central = std::make_unique<ts::Server>(false, port);
+    {
+        auto activation = central->accept();
+        ASSERT_NE(ts::receiveFrame(activation).find("#1#1#"), std::string::npos);
+        acknowledgeNap(activation, 1, "1");
+    }
+    status = central->accept();
+    request = 1;
+    // Observe a fresh Ready state after the outage rather than the earlier startup text.
+    const auto offset = station.process().output().size();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{6};
+    while (station.process().output().find(blocked ? "Central connection: Available" : "Ready to water", offset) == std::string::npos) {
+        ASSERT_LT(std::chrono::steady_clock::now(), deadline) << station.process().output();
+        ts::receiveFrame(status);
+        acknowledgeNap(status, request++, "1");
+        EXPECT_FALSE(station.process().waitFor(std::chrono::milliseconds{20}));
+    }
+    EXPECT_TRUE(monitor.running());
+    EXPECT_TRUE(station.process().running());
+}
+
+INSTANTIATE_TEST_SUITE_P(Availability, CentralOutageState, testing::Values(false, true));
 
 TEST(Process, EngineBindFailureExitsWithOpenStdin) {
     ts::Server occupied(true);
