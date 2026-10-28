@@ -91,6 +91,8 @@ def _generic_kafka_consumer(bootstrap_servers: str, operator_id: int, topic: str
         "bootstrap.servers": bootstrap_servers,
         "group.id": f"group-notis-{operator_id}",
         "auto.offset.reset": "latest",
+        "enable.auto.commit": True,
+        "session.timeout.ms": 6000,
     }
     
     try:

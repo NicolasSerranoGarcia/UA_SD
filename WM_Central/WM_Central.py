@@ -4,14 +4,16 @@ import argparse
 import socket
 import threading
 import modules.DBManager as db
-import modules.NAPManager as nap
+import modules.NAPManager as nap    
+from modules.kafka_clients import *
 from confluent_kafka import Consumer, Producer
 
 FORMAT = 'utf-8'
 BLOCK_TAM = 1024
 SEPARATOR = "#"
-                             
+                  
 def manage_WS(client_socket: socket.socket, addr):
+    """Function that manages the connection through sockets with an station"""
     
     buffer = ""
     current_station_id = None
@@ -70,10 +72,23 @@ def manage_WS(client_socket: socket.socket, addr):
     finally:
         
         client_socket.close()
-        
 
+def telemetry_handler(data: dict):
+    
+    pass
 
+def fo_req_handler(data:dict):
+    
+    pass
 
+def ws_finish_conf_handler(data: dict):
+    
+    pass
+
+def ws_start_conf_handler(data: dict):
+    
+    pass
+    
 def main():
     
     argparser = argparse.ArgumentParser(description="Central for Water Management Network")
@@ -90,6 +105,8 @@ def main():
     kafka_ip = args.kafka_ip
     kafka_port = args.kafka_port
     
+    bootstrap_servers = f"{kafka_ip}:{kafka_port}"
+    
     validation_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     validation_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) # Avoids OSError: [Errno 98] Address already in use
     validation_server.bind((server_ip, server_port))
@@ -98,6 +115,25 @@ def main():
     
     print(f"Server listening through {server_ip}:{server_port}")
     
+    stop_event = threading.Event()
+    topic_handlers = {
+        "telemetry": telemetry_handler,
+        "fo-req": fo_req_handler,
+        "ws-finish-conf": ws_finish_conf_handler,
+        "ws-start-conf": ws_start_conf_handler,
+    }
+    
+    
+    try:
+        
+        start_kafka(bootstrap_servers, stop_event, topic_handlers)
+    
+    except Exception as e:
+        
+        print(f"[KAFKA ERROR] {e}")
+        return 
+    
+    # Sockets management
     try:
     
         while True:
@@ -115,16 +151,15 @@ def main():
             
     except KeyboardInterrupt:
         
-        db.stop_database()
         print("Interruption forced. Exiting the program...")
     
     except Exception as e:
         
-        db.stop_database()
         print("Unexpected error:", e)
         
     finally:
         
+        stop_event.set()
         validation_server.close()
 
 
@@ -132,4 +167,5 @@ if __name__ == "__main__":
     
     db.init_database()
     main()
+    db.stop_database()
 
