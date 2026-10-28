@@ -1,4 +1,4 @@
-# HCP Protocol Specification — Version 1.2
+# HCP Protocol Specification — Version 1.3
 
 HCP (Health Check Protocol) lets a station's Monitor check whether its Engine
 is healthy and convey a successful NAP activation. Irrigation operations arrive
@@ -31,9 +31,16 @@ newline, separator, or null terminator.
 | Direction | Bytes | Meaning |
 | --- | --- | --- |
 | Monitor → Engine | `HC` | Request the current health status. |
+| Monitor → Engine | `DC` | Central unavailable: reject new irrigation, let current irrigation finish. |
 | Monitor → Engine | `AC` | Apply activation after Central acknowledges NAP activation. |
 | Engine → Monitor | `OK` | Healthy (`true`). |
 | Engine → Monitor | `KO` | Fault active (`false`). |
+
+For `DC`, Engine returns `OK` to acknowledge receipt. This does not report Engine
+health, consume a latched leak, close the valve, clear administrative blocking, or
+disable Kafka reporting while Monitor remains connected. Fresh acknowledged NAP
+activation followed by `AC` restores admission. The command is local to the two WS
+modules; Central's NAP and Kafka formats are unchanged.
 
 For `AC`, `OK` means activation was applied; `KO` means it was refused. Identification
 and an ordinary healthy response do not grant activation. `AC` cannot clear a
@@ -87,3 +94,14 @@ Both images require `WM_WS` as their Docker build context for the shared header:
 docker build -f WM_WS/WM_WS_E/Dockerfile -t wm-ws-e WM_WS
 docker build -f WM_WS/WM_WS_M/Dockerfile -t wm-ws-m WM_WS
 ```
+
+## Central availability
+
+NAP registration and retries run independently of HCP. If an already-authorized
+Engine loses Central service while Monitor is still healthy, Monitor sends `DC`
+and waits for its acknowledgement, continuing the one-second health checks.
+An AC/KO response for an administrative block still acknowledges the Central
+availability exchange; subsequent outage notifications must still be sent.
+New irrigation and administrative unblocking are refused during that outage.
+Existing irrigation can finish and report its totals through Kafka; Monitor loss
+still stops it. Failed or stale NAP exchanges cannot grant HCP activation.

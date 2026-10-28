@@ -88,6 +88,23 @@ libraries; the available features depend on the development packages installed.
 The compiler, CMake, Git, platform SDKs, and operating system libraries must
 still be supplied by the build environment.
 
+## Central and Monitor outage behavior
+
+Monitor registers and retries transient Central failures in a separate worker,
+so Engine health checks continue even when Central is offline. It re-resolves
+Central when opening a new connection. Rejected protocol exchanges remain visible
+as controlled errors; connectivity failures retry automatically.
+
+When Central becomes unavailable, Monitor sends the WS-local HCP `DC` command.
+Engine lets an ongoing irrigation finish, keeps its measurements and pending
+Kafka records, and rejects new manual or external irrigation starts. After Central
+acknowledges fresh activation and reporting, Monitor sends `AC` again. An existing
+administrative BLOCK still requires an external `ACTIVATE` on `central-ops`.
+
+Monitor loss is different: Engine closes the valve when it detects HCP EOF/timeout,
+revokes activation, and stops publishing to Kafka. Restarting Monitor restores
+the normal activation exchange; it never resumes old irrigation.
+
 ## Optional Qt support
 
 The Monitor's `BUILD_GUI` option defaults to `OFF`. With it disabled, Qt is
@@ -100,10 +117,10 @@ cmake --build WM_WS/WM_WS_M/build/gui
 ```
 
 `cmake/qt.cmake` defines the `wm_ws_qt` interface library, linking Qt6 Core,
-Gui, and Widgets. Other Monitor libraries that use Qt should link this target.
-AUTOMOC and AUTORCC are enabled on the Monitor executable only; AUTOUIC is
-disabled. This prepares the build for a GUI; the application still runs its
-existing console entry point.
+Gui, and Widgets. With `BUILD_GUI=ON`, Monitor runs its live Qt panel instead of
+the terminal menu. The panel includes Help (F1), Open Activity Log (Ctrl+L), and
+Quit Monitor (Ctrl+Q). See [the GUI guide](WM_WS_M/docs/gui.md) for controls,
+status colors, and shutdown behavior. Engine retains its terminal interface.
 
 Use `-DCMAKE_PREFIX_PATH=/path/to/Qt` to select an existing Qt installation.
 If Qt is missing, Qt Base 6.8.3 is downloaded, configured, built, and installed
@@ -156,23 +173,18 @@ In **terminal 1**, start Engine with its interactive menu:
 docker run -it --name wm-engine --network wm-network -v wm-engine-state:/var/lib/wm-ws -v wm-station-logs:/var/log/wm-ws wm-engine
 ```
 
-In **terminal 2**, find Engine's address and start Monitor. In Bash:
+In **terminal 2**, start Monitor using Engine's Docker network name (the same
+command works in Bash and PowerShell):
 
-```bash
-ENGINE_IP=$(docker inspect -f '{{(index .NetworkSettings.Networks "wm-network").IPAddress}}' wm-engine)
-docker run -it --name wm-monitor --network wm-network -v wm-station-logs:/var/log/wm-ws -e WS_ID=1 -e ENGINE_IP="$ENGINE_IP" wm-monitor
+```sh
+docker run -it --name wm-monitor --network wm-network -v wm-station-logs:/var/log/wm-ws -e WS_ID=1 -e ENGINE_HOSTNAME=wm-engine wm-monitor
 ```
 
-In PowerShell, use this block instead:
-
-```powershell
-$ENGINE_IP = docker inspect -f '{{(index .NetworkSettings.Networks "wm-network").IPAddress}}' wm-engine
-docker run -it --name wm-monitor --network wm-network -v wm-station-logs:/var/log/wm-ws -e WS_ID=1 -e ENGINE_IP="$ENGINE_IP" wm-monitor
-```
-
-Monitor currently accepts a numeric IPv4 address. Its image default, `127.0.0.1`,
-refers to Monitor's own container. Reinspect Engine's address if you recreate its
-container, then recreate Monitor with the updated `ENGINE_IP`.
+Monitor resolves Engine's hostname again on each connection attempt. Either
+application can start first; Monitor retries while Engine is unavailable and
+reconnects after Engine is recreated. For a fixed address, use `ENGINE_IP` instead
+and leave `ENGINE_HOSTNAME` unset. The image's `127.0.0.1` IP default refers to
+Monitor's own container.
 
 ### Option 2: use Compose to launch each application separately
 
@@ -184,18 +196,18 @@ There is no automatic startup or restart dependency between them.
 In **terminal 1**, build and launch Engine:
 
 ```sh
-docker compose -f WM_WS/compose.yaml -p ws-1 run --build --no-deps --use-aliases --name wm-engine engine
+docker compose -f WM_WS/compose.yaml -p ws-1 run --build --remove-orphans --no-deps --use-aliases --name wm-engine engine
 ```
 
 In **terminal 2**, build and launch Monitor:
 
 ```sh
-docker compose -f WM_WS/compose.yaml -p ws-1 run --build --no-deps --name wm-monitor monitor
+docker compose -f WM_WS/compose.yaml -p ws-1 run --build --remove-orphans --no-deps --name wm-monitor monitor
 ```
 
 Use the same project name (`ws-1`) in both terminals so they join the same network.
 `--use-aliases` makes Engine reachable as `engine`; Monitor's startup command
-resolves that name to the IPv4 address its executable needs. `--no-deps` ensures
+resolves that name on each reconnect. `--no-deps` ensures
 a command does not launch the other application. See the
 [Compose run reference](https://docs.docker.com/reference/cli/docker/compose/run/).
 Omit `--build` on later launches to reuse existing images.
@@ -231,8 +243,8 @@ docker start -ai wm-monitor
 Restarting reuses the container's original configuration. To rebuild or change
 environment settings, stop and remove that container before repeating its launch
 command. Persistent volumes retain logs and recovery data. After recreating
-Engine, restart Monitor so it resolves the new address in the Compose workflow;
-in the direct workflow, recreate Monitor with the updated IP.
+Engine, Monitor reconnects automatically when configured with its hostname. With
+a fixed `ENGINE_IP`, recreate Monitor with the updated IP if that address changes.
 
 ### Logs and recovery data
 
@@ -311,7 +323,8 @@ Native example with every operational parameter (run from the repository root):
 | ------------------------------- | ------------------------- | -------------------------------------------------------------------------- |
 | `--help`                      | â€”                    | Print available options and exit.                                          |
 | `--ws-id ID`                  | Required                  | Station ID: 1â€“64 letters, digits, hyphens, or underscores.            |
-| `--engine-ip IPV4`            | Required                  | Engine address in dotted-decimal IPv4 format. Hostnames are not supported. |
+| `--engine-ip IPV4` | Alternative | Fixed Engine IPv4 address; supply this or `--engine-hostname`. |
+| `--engine-hostname HOST` | Alternative | Resolve Engine again on reconnect; mutually exclusive with `--engine-ip`. |
 | `--engine-port PORT`          | `8080`                  | Engine HCP listening port.                                                 |
 | `--hcp-timeout-ms MS`         | `2000`                  | HCP connect/send/response deadline.                                        |
 | `--hcp-retry-ms MS`           | `1000`                  | Delay between engine connection attempts.                                  |
@@ -352,6 +365,7 @@ default; a runtime environment variable overrides that default for one container
 | `wm-engine`  | `LOG_FILE`         | `/var/log/wm-ws/wm-ws-engine.log`  | `--log-file`         |
 | `wm-monitor` | `LOG_FILE`         | `/var/log/wm-ws/wm-ws-monitor.log` | `--log-file`         |
 | `wm-monitor` | `WS_ID`            | `1`                                | `--ws-id`            |
+| `wm-monitor` | `ENGINE_HOSTNAME` | Empty | `--engine-hostname` (when nonempty; takes precedence over `ENGINE_IP`) |
 | `wm-monitor` | `ENGINE_IP`        | `127.0.0.1`                        | `--engine-ip`        |
 | `wm-monitor` | `ENGINE_PORT`      | `8080`                             | `--engine-port`      |
 | `wm-monitor` | `CENTRAL_HOSTNAME` | `altaria.proxy.rlwy.net`           | `--central-hostname` |
@@ -381,8 +395,15 @@ running evaluation; producers and consumers must use the same counts.
 Delivery of pending records is at least once. The README's final-summary format has
 no session/operation identifier, so identical summaries cannot always be distinguished
 from retransmissions after a crash. Central must account for that contract limitation.
-The recovery summary uses the last persisted measurements, checkpointed every second
-while watering; it never invents water measurements from time spent offline.
+Engine samples progress at a nominal 100 ms cadence and exposes new measurements
+only after saving the snapshot to the synced journal. A crash cannot roll back
+previously exposed committed measurements (within displayed rounding). Valve
+closure does not wait for disk I/O; final totals are persisted before their summary
+is published. Recovery never adds water or elapsed time from time spent offline.
+This is a durable simulated-meter guarantee, not a claim to measure physical water
+between disk commits. Existing unversioned checkpoints remain readable; new local
+checkpoints carry version 1. Broker acknowledgements confirm Kafka delivery, not
+Central processing, and a crash around acknowledgement may still cause a replay.
 
 Central integration: healthy NAP reports indicate Monitor liveness and must not
 erase Watering/Out-of-service state. Central must mark a lost healthy Monitor
@@ -417,14 +438,36 @@ docker build -f WM_WS/WM_WS_M/Dockerfile --build-arg BUILD_TESTING=ON --build-ar
 docker run --rm wm-monitor_tests ctest --test-dir build --output-on-failure
 ```
 
-## Process integration tests
-
-After building both executables, stop any manual native test processes and run:
+The same process integration suite can run entirely inside Linux containers,
+using the two test images built above:
 
 ```sh
+docker build -f WM_WS/tests/Dockerfile -t wm-process_tests WM_WS
+docker run --rm wm-process_tests
+```
+
+To validate the optional GUI without a display server:
+
+```sh
+docker build -f WM_WS/WM_WS_M/Dockerfile --build-arg BUILD_TESTING=ON --build-arg BUILD_GUI=ON -t wm-monitor-gui_tests WM_WS
+docker run --rm -e QT_QPA_PLATFORM=offscreen -e LANG=C.UTF-8 wm-monitor-gui_tests ctest --test-dir build --output-on-failure
+```
+
+## Process integration tests
+
+See [the acceptance matrix](ACCEPTANCE.md) for requirement coverage, recovery
+guarantees, and the remaining full-system evaluation checks.
+
+Process tests exercise the terminal frontend. Build Monitor in a separate CLI
+folder so a GUI configuration in the normal build folder does not change their
+behavior. Stop any manual native test processes, then run:
+
+```sh
+cmake -S WM_WS/WM_WS_M -B WM_WS/WM_WS_M/build/cli -DBUILD_GUI=OFF -DBUILD_TESTING=OFF
+cmake --build WM_WS/WM_WS_M/build/cli
 cmake -S WM_WS/tests -B WM_WS/WM_WS_M/build/process-tests \
   -DENGINE_EXECUTABLE="$PWD/WM_WS/WM_WS_E/build/WM_WS_E" \
-  -DMONITOR_EXECUTABLE="$PWD/WM_WS/WM_WS_M/build/WM_WS_M"
+  -DMONITOR_EXECUTABLE="$PWD/WM_WS/WM_WS_M/build/cli/WM_WS_M"
 cmake --build WM_WS/WM_WS_M/build/process-tests
 ctest --test-dir WM_WS/WM_WS_M/build/process-tests --output-on-failure
 ```
