@@ -1,8 +1,8 @@
 #include "gui/run.hpp"
+#include "logging.hpp"
 
 #include "app/app.hpp"
 #include "gui/window.hpp"
-#include "logging.hpp"
 #include <QApplication>
 #include <QMetaObject>
 #include <exception>

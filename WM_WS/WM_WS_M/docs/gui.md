@@ -32,3 +32,27 @@ the worker finishes. Retry and health-check sleeps wake immediately on stop.
 An in-flight socket operation can take its configured timeout; system DNS
 resolution must return before shutdown completes. Startup failures remain
 visible until the window is dismissed.
+
+## Using the panel
+
+The panel takes its visual cues from the assignment's page 6 desktop example:
+light gray surfaces, white information panels, compact rows, thin borders and
+colored status cells. It presents one Monitor rather than Central's map/dashboard.
+Health and connection indicators also include text: green means a healthy response/available connection, red means
+an Engine fault, and gray means waiting, disconnected or stopped. Monitor does
+not infer watering or administrative blocking from a health response.
+
+Status updates automatically. The top controls remain visible when the
+status area scrolls in a smaller window:
+
+- **Help (F1):** opens a separate explanation of statuses and controls.
+- **Open Activity Log (Ctrl+L):** opens a read-only preview of the most recent
+  64 KiB. Select **Refresh** to read new entries. Missing or inaccessible files
+  show an error in the preview. The displayed path is selectable.
+- **Quit Monitor (Ctrl+Q):** requests graceful shutdown, just like closing the
+  window. The panel remains responsive while pending network operations finish.
+  Engine will stop watering when it detects that Monitor disconnected.
+
+Help and the activity log are nonmodal: monitoring and live updates continue
+while they are open. Use Engine's own interface to start/stop watering or
+simulate/repair a fault. Monitor does not offer those actions.
