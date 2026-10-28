@@ -159,5 +159,9 @@ def _generic_kafka_consumer(bootstrap_servers: str, operator_id: int, topic: str
         except Exception as e:
             
             print(f"[ERROR PARSING MESSAGE] Consumer of topic {topic}: {e}")
+            
+        finally:
+            
+            consumer.close()
         
-    consumer.close()
+    
