@@ -92,7 +92,7 @@ def _generic_consumer(bootstrap_servers: str, topic: str, stop_event: threading.
         
         consumer.close()
 
-def send_event(topic: str, msg: dict, key: str | None = None):
+def send_event(topic: str, msg: dict, key: str | int | None = None):
     """Funtion that sends a message to a specific topic, with a possible key"""
     
     if _producer is None:
@@ -103,7 +103,7 @@ def send_event(topic: str, msg: dict, key: str | None = None):
     try:
         
         msg_bytes = json.dumps(msg).encode(FORMAT)
-        key_bytes = key.encode(FORMAT) if key else None
+        key_bytes = str(key).encode(FORMAT) if key else None
         
         _producer.produce(topic=topic, value=msg_bytes, key=key_bytes)
         _producer.poll(0)
@@ -115,11 +115,13 @@ def send_event(topic: str, msg: dict, key: str | None = None):
 def stop_kafka():
     """Function that clears all the pending messages before exiting the program"""
     
+    if _stop_event:
+        
+        _stop_event.set()
+    
     if _producer:
         
         _producer.flush(timeout=3)
 
-    if _stop_event:
-        
-        _stop_event.set()
+
 
