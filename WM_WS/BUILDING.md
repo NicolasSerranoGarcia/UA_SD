@@ -287,8 +287,11 @@ Engine stays idle until you start watering again.
 
 Use `start` and `stop` for manual irrigation. Manual starts publish `ws-start-conf`
 with `station_id` and `operation_code: null`; Central assigns the operation code
-internally. A Central `BLOCK` stops irrigation and prevents manual starts. Only
-an external `ACTIVATE` clears that block; it does not resume the old irrigation.
+internally. A Central `BLOCK` stops irrigation and prevents manual starts. An active
+leak rejects a new `BLOCK` with a `KO` confirmation; repair the leak first, then issue
+another `BLOCK` with a new operation code. Reusing the rejected code replays its
+original `KO`. A block accepted before a leak remains after repair. Only an
+external `ACTIVATE` clears that block; it does not resume the old irrigation.
 
 To test Monitor loss, type `quit` in its terminal. Engine must stop watering,
 reject starts, and withhold Kafka output. Run `docker start -ai wm-monitor` in the

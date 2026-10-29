@@ -85,6 +85,10 @@ std::expected<void, std::string> Station::handle(std::string_view payload, Befor
             return {};
         }
         tick();
+        if (type == "BLOCK" && !engine_.isHealthy()) {
+            reply(operation, false, "Station has an active leak; repair it before blocking");
+            return {};
+        }
         // Persist intent before valve changes. A crash must not replay a start as new work.
         intent_ = command;
         replies_[code] = {{"station_id", numericId_}, {"operation_code", operation},
@@ -97,10 +101,14 @@ std::expected<void, std::string> Station::handle(std::string_view payload, Befor
         if (beforeAction)
             beforeAction();
         if (type == "BLOCK") {
-            (void)engine_.block(0);
-            blocked_ = true;
-            finish();
-            reply(operation, true);
+            const auto result = engine_.block(0);
+            if (result) {
+                blocked_ = true;
+                finish();
+            } else {
+                blocked_ = previousBlock;
+            }
+            reply(operation, result.has_value(), "Station has an active leak; repair it before blocking");
         } else if (type == "ACTIVATE") {
             const auto result = engine_.unblock(0);
             if (result)
@@ -225,7 +233,7 @@ std::expected<void, std::string> Station::restore(const boost::json::object &sta
         engine_.restoreMeter({0, state.at("volume_l").to_number<double>(), state.at("elapsed_s").to_number<double>()});
         blocked_ = state.at("blocked").as_bool();
         if (blocked_)
-            (void)engine_.block(0);
+            engine_.restoreBlock();
         for (const auto &entry : state.at("pending").as_array()) {
             const auto &record = entry.as_object();
             events_.push_back({std::string(record.at("topic").as_string()),

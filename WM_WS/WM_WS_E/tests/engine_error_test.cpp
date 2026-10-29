@@ -105,6 +105,20 @@ TEST(Engine, BlockingStopsIrrigationAndUnblockingDoesNotRepairFault) {
     EXPECT_FALSE(engine.start().has_value());
 }
 
+TEST(Engine, RejectsBlockDuringLeakAndAcceptsAfterRepair) {
+    Engine engine;
+    engine.injectFault();
+    const auto result = engine.block(0);
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().type, Engine::ErrorType::Fault);
+    EXPECT_FALSE(engine.isBlocked());
+    EXPECT_FALSE(engine.checkHealth());
+    engine.repair();
+    EXPECT_TRUE(engine.checkHealth());
+    ASSERT_TRUE(engine.block(0));
+    EXPECT_TRUE(engine.isBlocked());
+}
+
 TEST(Engine, RepairDoesNotRemoveCentralBlock) {
     Engine engine;
     engine.setMonitorConnected(true);

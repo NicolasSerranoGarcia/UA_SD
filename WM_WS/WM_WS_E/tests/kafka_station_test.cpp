@@ -52,6 +52,48 @@ TEST_F(KafkaStation, UsesReadmeOperationsAndExactConfirmationShape) {
     EXPECT_TRUE(engine.isRunning());
 }
 
+TEST_F(KafkaStation, RejectsBlockUntilLeakIsRepaired) {
+    engine.injectFault();
+    bool actionPrepared = false;
+    ASSERT_TRUE(station.handle(command("BLOCK", 1), [&] { actionPrepared = true; }));
+    EXPECT_FALSE(actionPrepared);
+    EXPECT_FALSE(engine.isBlocked());
+    EXPECT_FALSE(station.checkpoint().at("blocked").as_bool());
+    ASSERT_EQ(station.events().size(), 1);
+    EXPECT_EQ(station.events().back().value.at("status").as_string(), "KO");
+    EXPECT_NE(std::string(station.events().back().value.at("reason").as_string()).find("leak"), std::string::npos);
+    EXPECT_FALSE(engine.checkHealth());
+    engine.repair();
+    EXPECT_TRUE(engine.checkHealth());
+    ASSERT_TRUE(engine.activateFromMonitor());
+    ASSERT_TRUE(station.handle(command("BLOCK", 1)));
+    EXPECT_EQ(station.events().back().value.at("status").as_string(), "KO");
+    EXPECT_FALSE(engine.isBlocked());
+    ASSERT_TRUE(station.handle(command("BLOCK", 2)));
+    EXPECT_EQ(station.events().back().value.at("status").as_string(), "OK");
+    EXPECT_TRUE(engine.isBlocked());
+}
+
+TEST_F(KafkaStation, LeakArrivingDuringBlockIntentIsRejected) {
+    ASSERT_TRUE(station.handle(command("BLOCK"), [&] { engine.injectFault(); }));
+    EXPECT_FALSE(engine.isBlocked());
+    EXPECT_FALSE(station.checkpoint().at("blocked").as_bool());
+    EXPECT_FALSE(engine.checkHealth());
+    EXPECT_EQ(station.events().back().value.at("status").as_string(), "KO");
+}
+
+TEST_F(KafkaStation, RejectedBlockDuringLeakPreservesAnExistingBlock) {
+    ASSERT_TRUE(station.handle(command("BLOCK", 1)));
+    engine.injectFault();
+    ASSERT_TRUE(station.handle(command("BLOCK", 2)));
+    EXPECT_EQ(station.events().back().value.at("status").as_string(), "KO");
+    EXPECT_TRUE(engine.isBlocked());
+    EXPECT_TRUE(station.checkpoint().at("blocked").as_bool());
+    engine.repair();
+    EXPECT_TRUE(engine.isBlocked());
+    EXPECT_FALSE(engine.activateFromMonitor());
+}
+
 TEST_F(KafkaStation, IgnoresOtherRecipientsSharingPartition) {
     ASSERT_TRUE(station.handle(command("BLOCK", 1, 3)));
     EXPECT_TRUE(engine.isActivated());
@@ -202,6 +244,26 @@ TEST_F(KafkaStation, NewStartIntentDoesNotReusePreviousIrrigationTotals) {
     kafka::Station restoredLocal(restoredLocalEngine, "1");
     ASSERT_TRUE(restoredLocal.restore(pending));
     EXPECT_EQ(restoredLocal.events().back().value.at("total_liters").to_number<double>(), 0);
+}
+
+TEST_F(KafkaStation, PersistedBlockSurvivesFaultBeforeRestore) {
+    ASSERT_TRUE(station.handle(command("BLOCK", 1)));
+    const auto saved = station.checkpoint();
+    Engine restoredEngine;
+    restoredEngine.injectFault();
+    kafka::Station restored(restoredEngine, "1");
+    ASSERT_TRUE(restored.restore(saved));
+    EXPECT_TRUE(restoredEngine.isBlocked());
+    EXPECT_FALSE(restoredEngine.isHealthy());
+    EXPECT_FALSE(restoredEngine.checkHealth());
+    restoredEngine.repair();
+    restoredEngine.setMonitorConnected(true);
+    EXPECT_FALSE(restoredEngine.activateFromMonitor());
+    EXPECT_FALSE(restoredEngine.start());
+    EXPECT_TRUE(restoredEngine.isBlocked());
+    ASSERT_TRUE(restored.handle(command("ACTIVATE", 2)));
+    EXPECT_TRUE(restoredEngine.isActivated());
+    EXPECT_FALSE(restoredEngine.isBlocked());
 }
 
 TEST_F(KafkaStation, InterruptedActivationKeepsAdministrativeBlock) {

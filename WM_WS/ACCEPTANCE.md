@@ -16,7 +16,7 @@ formats are unchanged. `DC` is a WS-local HCP extension for Central availability
 | Runtime configuration without recompilation | CLI validation; numeric IP and hostname alternatives; Docker environment mappings | Configure the actual lab/cloud endpoints |
 | Activate before starting | Engine eligibility tests; fresh NAP ACK followed by HCP AC | Central/FO authorization UI |
 | Manual, FO, and Central control | Station IRRIGATION/BLOCK/ACTIVATE tests; local menu process tests | Initiate operations through real FO and Central |
-| Block stops; external ACTIVATE required | Engine/Station tests; blocked and unblocked Central-outage process cases | Central Out of Service display and commands to all stations |
+| Block stops; external ACTIVATE required | Engine/Station tests; active leak rejects new BLOCK; repair preserves any earlier block; blocked and unblocked Central-outage process cases | Central Out of Service display and commands to all stations |
 | Flow meter, valve, and supervision | Flow bounds, integrated-volume tests, immediate stop/fault tests | Observe the simulation during the grading run |
 | One-second health checks | Monitor socket-peer and process tests on Windows and Linux | Observe real Central life-message handling |
 | Leak, repair, and reactivation | Latched KO; repeated OK/KO on one NAP health connection; acknowledged repair restores HCP authorization; block preserved; no automatic resume | Central Leak display and notification to the affected FO |

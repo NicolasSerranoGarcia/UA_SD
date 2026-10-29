@@ -119,7 +119,12 @@ class Engine {
     [[nodiscard]] std::expected<void, Error> stop();
 
     using server_token = std::uint32_t;
+
+    /// Reject an active fault; blocking must not replace a leak.
     [[nodiscard]] std::expected<void, Error> block(server_token /*token*/);
+
+    /// Restore a previously accepted block without clearing an active fault.
+    void restoreBlock();
 
     [[nodiscard]] std::expected<void, Error> unblock(server_token /*token*/);
 
