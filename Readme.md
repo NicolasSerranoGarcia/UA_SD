@@ -112,8 +112,8 @@ The JSON structure used in this topic is the following:
 {
   "station_id": "<integer: ID of the station sending the data>",
   "status": "FINISHED",
-  "total_liters": "<number: Total liters of water used>",
-  "total_time": "<number: Total irrigation time>",
+  "total_liters": "<number: Total liters of water used (L)>",
+  "total_time": "<number: Total irrigation time (min)>",
   "operator_id": "<integer|null: ID of the operator who started irrigation; null if irrigation was not started by any>"
 }
 ```
