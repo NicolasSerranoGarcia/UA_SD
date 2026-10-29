@@ -78,39 +78,53 @@ TEST_F(ReporterPeer, ActivatesBeforeHealthyReports) {
     acknowledge(status);
 }
 
-TEST_F(ReporterPeer, HealthyReportsReuseConnectionAndKoClosesIt) {
+TEST_F(ReporterPeer, HealthConnectionSurvivesRepeatedKoAndRepair) {
     nap::Reporter reporter(endpoint(), "station-1", 100ms, 500ms);
     reporter.update(true, "OK");
     auto activation = accept();
     ASSERT_EQ(receive(activation), "NAP#1.0#1#1#station-1#16#FIN");
     acknowledge(activation);
-    activation.close();
+    EXPECT_EQ(receive(activation, true), "");
     auto status = accept();
     ASSERT_EQ(receive(status), "NAP#1.0#1#2#station-1#OK#32#FIN");
     acknowledge(status);
     EXPECT_EQ(receive(status), "NAP#1.0#2#2#station-1#OK#31#FIN");
+    const auto initialActivation = reporter.activationGeneration();
+    ASSERT_NE(initialActivation, 0);
     acknowledge(status, 2);
     reporter.update(false, "KO");
     EXPECT_EQ(receive(status), "NAP#1.0#3#2#station-1#KO#30#FIN");
     acknowledge(status, 3);
-    EXPECT_EQ(receive(status, true), "");
+    const auto repeatedFault = receive(status);
+    ASSERT_TRUE(repeatedFault.starts_with("NAP#1.0#4#2#station-1#KO#")) << repeatedFault;
+    EXPECT_EQ(reporter.activationGeneration(), 0);
+    acknowledge(status, 4);
     reporter.update(true, "repaired");
-    auto reactivation = accept();
-    EXPECT_EQ(receive(reactivation), "NAP#1.0#1#1#station-1#16#FIN");
-    acknowledge(reactivation);
+    const auto repaired = receive(status);
+    ASSERT_TRUE(repaired.starts_with("NAP#1.0#5#2#station-1#OK#")) << repaired;
+    EXPECT_EQ(reporter.activationGeneration(), 0);
+    acknowledge(status, 5);
+    const auto healthy = receive(status);
+    ASSERT_TRUE(healthy.starts_with("NAP#1.0#6#2#station-1#OK#")) << healthy;
+    EXPECT_GT(reporter.activationGeneration(), initialActivation);
+    acknowledge(status, 6);
 }
 
 TEST_F(ReporterPeer, FastRepairCannotSkipUnacknowledgedFault) {
     nap::Reporter reporter(endpoint(), "station-1", 100ms, 500ms);
+    reporter.update(true, "OK");
+    auto activation = accept();
+    ASSERT_EQ(receive(activation), "NAP#1.0#1#1#station-1#16#FIN");
+    acknowledge(activation);
+    auto status = accept();
+    ASSERT_EQ(receive(status), "NAP#1.0#1#2#station-1#OK#32#FIN");
+    acknowledge(status);
     reporter.update(false, "KO");
     reporter.update(true, "repaired");
-    auto fault = accept();
-    ASSERT_EQ(receive(fault), "NAP#1.0#1#2#station-1#KO#32#FIN");
-    acknowledge(fault);
-    EXPECT_EQ(receive(fault, true), "");
-    auto activation = accept();
-    EXPECT_EQ(receive(activation), "NAP#1.0#1#1#station-1#16#FIN");
-    acknowledge(activation);
+    EXPECT_EQ(receive(status), "NAP#1.0#2#2#station-1#KO#31#FIN");
+    acknowledge(status, 2);
+    EXPECT_EQ(receive(status), "NAP#1.0#3#2#station-1#OK#30#FIN");
+    acknowledge(status, 3);
 }
 
 TEST_F(ReporterPeer, LateActivationCannotOverrideNewerFault) {
@@ -125,6 +139,30 @@ TEST_F(ReporterPeer, LateActivationCannotOverrideNewerFault) {
     acknowledge(status);
     std::this_thread::sleep_for(30ms);
     EXPECT_EQ(reporter.status().activationGeneration, 0);
+}
+
+TEST_F(ReporterPeer, LateHealthyRecoveryCannotOverrideNewerFault) {
+    nap::Reporter reporter(endpoint(), "station-1", 100ms, 500ms);
+    reporter.update(true, "OK");
+    auto activation = accept();
+    receive(activation);
+    acknowledge(activation);
+    auto status = accept();
+    receive(status);
+    acknowledge(status);
+    reporter.update(false, "first leak");
+    const auto fault = receive(status);
+    ASSERT_TRUE(fault.find("#KO#") != std::string::npos) << fault;
+    acknowledge(status, 2);
+    reporter.update(true, "repaired");
+    const auto recovery = receive(status);
+    ASSERT_TRUE(recovery.find("#OK#") != std::string::npos) << recovery;
+    reporter.update(false, "second leak");
+    acknowledge(status, 3);
+    const auto newerFault = receive(status);
+    ASSERT_TRUE(newerFault.find("#KO#") != std::string::npos) << newerFault;
+    EXPECT_EQ(reporter.activationGeneration(), 0);
+    acknowledge(status, 4);
 }
 
 TEST_F(ReporterPeer, UnavailableSnapshotCannotCarryActivation) {

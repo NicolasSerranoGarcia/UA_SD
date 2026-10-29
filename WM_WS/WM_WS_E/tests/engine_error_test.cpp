@@ -110,14 +110,18 @@ TEST(Engine, RepairDoesNotRemoveCentralBlock) {
     engine.setMonitorConnected(true);
     ASSERT_TRUE(engine.activateFromMonitor());
     ASSERT_TRUE(engine.block(0).has_value());
+    EXPECT_TRUE(engine.checkHealth());
     engine.injectFault();
+    EXPECT_FALSE(engine.checkHealth());
     EXPECT_FALSE(engine.checkHealth());
     engine.repair();
     EXPECT_TRUE(engine.isHealthy());
+    EXPECT_TRUE(engine.checkHealth());
     const auto blocked = engine.start();
     ASSERT_FALSE(blocked.has_value());
     EXPECT_EQ(blocked.error().type, Engine::ErrorType::BlockedByCentral);
     EXPECT_FALSE(engine.activateFromMonitor());
+    EXPECT_TRUE(engine.checkHealth());
     ASSERT_TRUE(engine.unblock(0).has_value());
     EXPECT_FALSE(engine.isRunning());
     EXPECT_EQ(engine.measureFlow(), 0);

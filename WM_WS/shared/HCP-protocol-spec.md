@@ -64,16 +64,20 @@ state, while `checkHealth()` supplies this latched wire response.
    default response deadline (`--hcp-timeout-ms 2000`), also used separately for
    connection establishment and each send/identification operation. Partial reads
    do not restart it. Monitor uses nonblocking sockets and steady-clock deadlines.
-4. On `KO`, Monitor reports the fault to CENTRAL through NAP, closes that NAP
-   connection after its acknowledgement, and continues checking on HCP.
+4. On `KO`, Monitor reports the fault to CENTRAL through the existing NAP health
+   connection. It keeps both connections open and continues sending periodic
+   health reports, including `KO` for as long as the fault persists.
 5. On timeout, connection failure, or invalid response, Monitor reports the
    health-check failure to CENTRAL, closes the connection, and retries connecting
    once per second. No response must never be interpreted as healthy.
-6. At startup and after fault/communication recovery, a healthy response causes
-   a fresh NAP activation exchange. Only after Central acknowledges it does Monitor
-   send `AC`. NAP failure never grants activation.
+6. At startup and after NAP communication failure, activation uses a separate
+   short-lived NAP connection, followed by the persistent health connection.
+   Monitor sends `AC` only after a healthy NAP status is acknowledged. After leak
+   repair on an intact NAP connection, acknowledged `OK` restores authorization
+   through HCP `AC` without another NAP activation exchange. `AC` still cannot
+   clear Central's administrative block. NAP failure never grants activation.
 
-Healthy NAP status reports reuse a persistent connection, allowing Central to
+Both healthy and fault NAP status reports reuse a persistent connection, allowing Central to
 detect loss of Monitor. Engine detects HCP EOF, invalid requests, and receive
 timeouts, stops irrigation, revokes activation, and disables Kafka publication.
 Reconnecting alone does not restore permission to start or publish. Final water

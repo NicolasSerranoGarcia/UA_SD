@@ -19,7 +19,7 @@ formats are unchanged. `DC` is a WS-local HCP extension for Central availability
 | Block stops; external ACTIVATE required | Engine/Station tests; blocked and unblocked Central-outage process cases | Central Out of Service display and commands to all stations |
 | Flow meter, valve, and supervision | Flow bounds, integrated-volume tests, immediate stop/fault tests | Observe the simulation during the grading run |
 | One-second health checks | Monitor socket-peer and process tests on Windows and Linux | Observe real Central life-message handling |
-| Leak, repair, and reactivation | Latched KO; acknowledged NAP close; HCP retained; no automatic resume | Central Leak display and notification to the affected FO |
+| Leak, repair, and reactivation | Latched KO; repeated OK/KO on one NAP health connection; acknowledged repair restores HCP authorization; block preserved; no automatic resume | Central Leak display and notification to the affected FO |
 | One-second live measurements | Terminal refresh and telemetry tests; same simulated flow model | Required real Central/FO displays |
 | Duration expiry, local stop, final totals | Engine deadline, Station completion, owner and exact-schema tests | Final liters/time summary reaches the correct FO |
 | Available/Watering/Leak/Out of Service/Disconnected | Engine/Monitor state guards and visible status; Out of Service displayed explicitly | Central colors, blinking, and state precedence |
@@ -77,6 +77,25 @@ The Docker smoke rehearsal used uniquely named test resources, loopback-only
 Central/Kafka endpoints, two station IDs, independent containers and separate
 Compose run commands. It verified hostname reconnection after an Engine IP change
 and removed only its own test containers, networks, and volumes afterward.
+
+## Continuous NAP health reporting (2026-10-29)
+
+Monitor keeps the health connection open after an acknowledged `KO` and continues
+sending health reports at the configured interval (default one second). Repair
+returns to `OK` on the same socket. The initial NAP activation still uses a
+separate connection, and HCP recovery authorization cannot clear a Central block.
+
+Verification: 39 Monitor/backend GUI tests passed on native Windows and Linux;
+22 native process tests passed; the Engine block/repair health regression passed.
+These tests include repeated `KO`, quick repair, late recovery acknowledgement,
+and same-socket recovery.
+
+The bundled Central still returns `False` after acknowledging `KO` in
+`WM_Central/modules/NAPManager.py`; `WM_Central/WM_Central.py` then closes the
+socket. Central must keep that health connection open for this lifecycle to work
+end to end. Its healthy-report handler must also preserve administrative blocking
+and watering state rather than treating every `OK` as an activation. These are
+teammate integration dependencies; this change does not modify Central.
 
 ## Full-system evaluation gate
 

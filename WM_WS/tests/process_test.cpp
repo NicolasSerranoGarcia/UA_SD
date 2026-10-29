@@ -430,7 +430,7 @@ TEST_P(RegistrationResponse, MonitorActivatesOnNewConnectionAndReportsEngineHeal
     FAIL() << "Monitor did not report the engine disconnection";
 }
 
-TEST(Process, LeakClosesNapAndRepairRequiresNewActivation) {
+TEST(Process, LeakKeepsNapOpenAndRepairRestoresHealthyReports) {
     ts::Engine engine;
     engine.socket().close();
     ts::Server central;
@@ -450,25 +450,35 @@ TEST(Process, LeakClosesNapAndRepairRequiresNewActivation) {
     acknowledgeNap(status, 1);
     engine.process().sendInput("F\n");
     bool reportedFault = false;
-    for (unsigned int request = 2; request < 40; ++request) {
+    unsigned int request = 2;
+    for (; request < 40; ++request) {
         const auto frame = ts::receiveFrame(status);
         acknowledgeNap(status, request);
         if (frame.find("#KO#") != std::string::npos) {
             reportedFault = true;
+            ++request;
             break;
         }
     }
     ASSERT_TRUE(reportedFault);
-    EXPECT_EQ(ts::receive(status, 1), "");
-    engine.process().sendInput("R\n");
-    {
-        auto activation = central.accept();
-        EXPECT_EQ(ts::receiveFrame(activation), "NAP#1.0#1#1#station-1#16#FIN");
-        acknowledgeNap(activation, 1);
+    for (int repeat = 0; repeat < 3; ++repeat) {
+        const auto frame = ts::receiveFrame(status);
+        ASSERT_TRUE(frame.starts_with("NAP#1.0#" + std::to_string(request) + "#2#station-1#KO#")) << frame;
+        acknowledgeNap(status, request++);
     }
-    auto recovered = central.accept();
-    EXPECT_EQ(ts::receiveFrame(recovered), "NAP#1.0#1#2#station-1#OK#32#FIN");
-    acknowledgeNap(recovered, 1);
+    engine.process().sendInput("R\n");
+    bool recovered = false;
+    for (int attempt = 0; attempt < 40; ++attempt) {
+        const auto frame = ts::receiveFrame(status);
+        ASSERT_TRUE(frame.starts_with("NAP#1.0#" + std::to_string(request) + "#2#station-1#")) << frame;
+        acknowledgeNap(status, request++);
+        if (frame.find("#OK#") != std::string::npos) {
+            recovered = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(recovered);
+
 }
 
 INSTANTIATE_TEST_SUITE_P(Nap, RegistrationResponse,

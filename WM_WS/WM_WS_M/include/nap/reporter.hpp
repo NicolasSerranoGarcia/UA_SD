@@ -39,7 +39,7 @@ class Reporter {
 
     void update(bool healthy, std::string_view reason);
 
-    /// Zero until healthy recovery has been activated and every pending fault acknowledged.
+    /// Zero until healthy reporting is acknowledged after activation or fault recovery.
     [[nodiscard]] std::uint64_t activationGeneration() const;
     [[nodiscard]] CentralStatus status() const;
 

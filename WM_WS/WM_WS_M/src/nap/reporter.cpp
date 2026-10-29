@@ -113,7 +113,6 @@ bool Reporter::send(bool healthy, const std::string &reason) {
     if (!response) return failed(response.error());
     logging::record() << "[Central][NAP] ws=" << wsId_ << " status acknowledged: state="
                       << (healthy ? "healthy" : "fault") << " reason=" << reason << std::endl;
-    if (!healthy) { connection_.reset(); needsActivation_ = true; }
     return true;
 }
 
@@ -122,7 +121,7 @@ void Reporter::run() {
     status_.registered = location_.empty();
     while (!stopping_) {
         if (status_.fatal) { changed_.wait(lock); continue; }
-        if (status_.registered && faultGeneration_ == acknowledgedFault_ && (!healthy_ || !*healthy_)) {
+        if (status_.registered && !healthy_) {
             changed_.wait(lock);
             continue;
         }
@@ -130,8 +129,7 @@ void Reporter::run() {
         if (std::chrono::steady_clock::now() < due) { changed_.wait_until(lock, due); continue; }
         const bool registration = !status_.registered;
         const auto generation = faultGeneration_;
-        const bool healthy = generation == acknowledgedFault_;
-        const bool activation = healthy && needsActivation_;
+        const bool healthy = healthy_.value_or(false) && generation == acknowledgedFault_;
         const auto reason = healthy ? reason_ : faultReason_;
         lock.unlock();
         bool acknowledged = false;
@@ -149,7 +147,8 @@ void Reporter::run() {
         if (!acknowledged || !healthy) activated_ = false;
         if (!registration && acknowledged && !healthy) acknowledgedFault_ = generation;
         if (!registration && acknowledged && healthy && healthy_.value_or(false) && generation == faultGeneration_) {
-            if (activation) ++activationGeneration_;
+            // Acknowledged repair restores HCP authorization without reopening NAP.
+            if (!activated_) ++activationGeneration_;
             activated_ = true;
         }
         // A successful registration can proceed directly to the pending health report.

@@ -101,6 +101,16 @@ Kafka records, and rejects new manual or external irrigation starts. After Centr
 acknowledges fresh activation and reporting, Monitor sends `AC` again. An existing
 administrative BLOCK still requires an external `ACTIVATE` on `central-ops`.
 
+NAP activation still uses its own short-lived connection. After that exchange,
+Monitor opens a persistent health-reporting connection. It sends `OK` or `KO`
+every second by default, including repeated `KO` reports throughout a leak.
+An acknowledged `KO` does not close the connection. Repair returns reports to
+`OK` on that same connection; after the healthy report is acknowledged, Monitor
+restores Engine authorization through HCP `AC`. No new NAP activation exchange
+is needed for a leak/repair cycle on a healthy connection, and an existing
+Central block remains until an external Kafka `ACTIVATE`. Actual connection
+failures still trigger reconnection and the activation recovery exchange.
+
 Monitor loss is different: Engine closes the valve when it detects HCP EOF/timeout,
 revokes activation, and stops publishing to Kafka. Restarting Monitor restores
 the normal activation exchange; it never resumes old irrigation.
@@ -328,7 +338,7 @@ Native example with every operational parameter (run from the repository root):
 | `--engine-port PORT`          | `8080`                  | Engine HCP listening port.                                                 |
 | `--hcp-timeout-ms MS`         | `2000`                  | HCP connect/send/response deadline.                                        |
 | `--hcp-retry-ms MS`           | `1000`                  | Delay between engine connection attempts.                                  |
-| `--nap-interval-ms MS`        | `1000`                  | Interval for healthy reports and retries of unacknowledged fault reports.  |
+| `--nap-interval-ms MS`        | `1000`                  | Interval for all health reports (OK/KO) and failed-exchange retries.  |
 | `--nap-timeout-ms MS`         | `2000`                  | NAP connect/send/response deadline.                                        |
 | `--central-hostname HOST`     | Required                  | Nonempty Central hostname; resolved to IPv4.                               |
 | `--central-port PORT`         | Required                  | Central NAP TCP port.                                                      |
@@ -405,10 +415,17 @@ between disk commits. Existing unversioned checkpoints remain readable; new loca
 checkpoints carry version 1. Broker acknowledgements confirm Kafka delivery, not
 Central processing, and a crash around acknowledgement may still cause a replay.
 
-Central integration: healthy NAP reports indicate Monitor liveness and must not
-erase Watering/Out-of-service state. Central must mark a lost healthy Monitor
-connection as Disconnected (including EOF), while an acknowledged KO remains a
-leak until reactivation. Telemetry must not override Monitor-derived disconnection.
+Central integration: NAP health reports indicate Monitor liveness. `KO` reports
+continue throughout a leak; a later `OK` reports repair. Healthy reports must not
+erase Watering/Out-of-service state or clear a deliberate block. Central must
+mark a lost Monitor connection as Disconnected (including EOF). Telemetry must
+not override Monitor-derived disconnection.
+
+The bundled Central currently closes its health socket after acknowledging `KO`
+(`WM_Central/modules/NAPManager.py`). Its handler must keep the connection open
+for continuous leak/repair reporting to work end to end. Monitor cannot prevent
+a peer from closing the connection; it treats that as a connection failure and
+reconnects. See [the acceptance notes](ACCEPTANCE.md) for this integration gate.
 
 Build argument example:
 
