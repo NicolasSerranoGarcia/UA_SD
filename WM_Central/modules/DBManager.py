@@ -182,7 +182,7 @@ def read_all_stations():
         
         cursor = conn.cursor()
         cursor.execute("""
-                       SELECT * FROM stations
+                       SELECT id, location, status FROM stations
                        """)
         
         return cursor.fetchall()
