@@ -97,6 +97,15 @@ def init_database():
                        )
                        """)
         
+        # To not wipe the railway volume, this code just adds the new column if is not created
+        try:
+            
+            cursor.execute("ALTER TABLE stations ADD COLUMN previous_status TEXT CHECK (previous_status IN ('Available', 'Watering', 'Leak', 'Out of service', 'Disconnected'));")
+            
+        except sqlite3.OperationalError:
+            
+            pass
+        
         conn.commit()
         
     except Exception as e:
