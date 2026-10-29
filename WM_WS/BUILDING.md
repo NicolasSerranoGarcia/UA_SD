@@ -281,9 +281,19 @@ output, including menus and fatal errors.
 ### Test faults and recovery
 
 Use Engine's menu to simulate a fault with `fault` and repair it with `repair`.
-Monitor should show the fault and report it to Central. After repair, Monitor
-requests a fresh NAP activation from Central before sending HCP `AC` to Engine.
-Engine stays idle until you start watering again.
+Monitor should show the fault and keep reporting it to Central. After repair,
+Monitor sends `OK` on the existing NAP health connection. Once Central acknowledges
+recovery, Monitor sends HCP `AC`; a fresh NAP activation is needed only if the
+NAP connection failed. Engine stays idle until you start watering again.
+
+Central can also send `"type": "STOP"` through `central-ops` to end the current
+irrigation while leaving the station activated and available for another start.
+It receives the usual `ws-start-conf`, and `ws-finish-conf` retains the original
+irrigation's operator, total liters and total time. No BLOCK/ACTIVATE cycle is
+needed. An already Available station also confirms STOP with OK, without
+another finish summary. A faulted, blocked, or not-yet-activated station returns
+KO: STOP cannot activate, repair, or unblock it. A duplicate operation code only
+replays its original confirmation.
 
 Use `start` and `stop` for manual irrigation. Manual starts publish `ws-start-conf`
 with `station_id` and `operation_code: null`; Central assigns the operation code

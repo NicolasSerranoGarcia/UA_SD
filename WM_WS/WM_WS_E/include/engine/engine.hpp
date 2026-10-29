@@ -120,6 +120,9 @@ class Engine {
 
     using server_token = std::uint32_t;
 
+    /// End watering or acknowledge active idle, without changing activation or blocking.
+    [[nodiscard]] std::expected<void, Error> stopFromCentral(server_token /*token*/);
+
     /// Reject an active fault; blocking must not replace a leak.
     [[nodiscard]] std::expected<void, Error> block(server_token /*token*/);
 

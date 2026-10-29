@@ -64,6 +64,24 @@ TEST(Engine, StartsStopsAndRestarts) {
     EXPECT_TRUE(engine.start().has_value());
 }
 
+TEST(Engine, CentralStopKeepsActivationAndAcceptsAvailableStations) {
+    Engine engine;
+    engine.setMonitorConnected(true);
+    ASSERT_TRUE(engine.activateFromMonitor());
+    ASSERT_TRUE(engine.start());
+    ASSERT_TRUE(engine.stopFromCentral(0));
+    EXPECT_FALSE(engine.isRunning());
+    EXPECT_TRUE(engine.isActivated());
+    EXPECT_FALSE(engine.isBlocked());
+    EXPECT_TRUE(engine.stopFromCentral(0));
+    EXPECT_TRUE(engine.isActivated());
+    engine.injectFault();
+    const auto fault = engine.stopFromCentral(0);
+    ASSERT_FALSE(fault);
+    EXPECT_EQ(fault.error().type, Engine::ErrorType::Fault);
+    EXPECT_FALSE(engine.isHealthy());
+}
+
 TEST(Engine, StoppingDoesNotRepairFault) {
     Engine engine;
     engine.setMonitorConnected(true);

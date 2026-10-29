@@ -21,7 +21,7 @@ formats are unchanged. `DC` is a WS-local HCP extension for Central availability
 | One-second health checks | Monitor socket-peer and process tests on Windows and Linux | Observe real Central life-message handling |
 | Leak, repair, and reactivation | Latched KO; repeated OK/KO on one NAP health connection; acknowledged repair restores HCP authorization; block preserved; no automatic resume | Central Leak display and notification to the affected FO |
 | One-second live measurements | Terminal refresh and telemetry tests; same simulated flow model | Required real Central/FO displays |
-| Duration expiry, local stop, final totals | Engine deadline, Station completion, owner and exact-schema tests | Final liters/time summary reaches the correct FO |
+| Duration expiry, local/Central STOP, final totals | Engine deadline, Station STOP without blocking, completion, original owner, duplicate/recovery and exact-schema tests | Final liters/time summary reaches the correct FO |
 | Available/Watering/Leak/Out of Service/Disconnected | Engine/Monitor state guards and visible status; Out of Service displayed explicitly | Central colors, blinking, and state precedence |
 | Monitor loss | Valve stops, activation revoked, publication suppressed; Docker peer-loss check | Central shows Disconnected even if Engine remains alive |
 | Engine crash | Hard-kill process test recovers final totals from the journal | Central/FO receive and display the recovered result |

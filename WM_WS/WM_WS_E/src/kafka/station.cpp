@@ -53,7 +53,7 @@ std::expected<void, std::string> Station::handle(std::string_view payload, Befor
         const auto operation = integer(received.at("operation_code"));
         addressedOperation = operation;
         const auto type = std::string(received.at("type").as_string());
-        if (type != "IRRIGATION" && type != "ACTIVATE" && type != "BLOCK")
+        if (type != "IRRIGATION" && type != "ACTIVATE" && type != "BLOCK" && type != "STOP")
             throw std::invalid_argument("unknown Central operation");
         const auto owner = received.at("operator_id");
         if (!owner.is_null())
@@ -109,6 +109,10 @@ std::expected<void, std::string> Station::handle(std::string_view payload, Befor
                 blocked_ = previousBlock;
             }
             reply(operation, result.has_value(), "Station has an active leak; repair it before blocking");
+        } else if (type == "STOP") {
+            const auto result = engine_.stopFromCentral(0);
+            finish();
+            reply(operation, result.has_value(), "Station must be active and healthy; STOP cannot clear a block or repair a leak");
         } else if (type == "ACTIVATE") {
             const auto result = engine_.unblock(0);
             if (result)

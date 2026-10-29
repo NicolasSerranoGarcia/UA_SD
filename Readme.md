@@ -136,8 +136,18 @@ The JSON structure used in this topic is the following:
 `"type"` can be one of the following:
 
 - `"IRRIGATION"` → Start irrigation.
+- `"STOP"` → Stop the current irrigation and leave the station activated, without blocking it. (`"duration"` is ignored.)
 - `"BLOCK"` → Block a station. (`"duration"` is ignored.)
 - `"ACTIVATE"` → Unblock a station. (`"duration"` is ignored.)
+
+`"STOP"` is confirmed through `WS-start-conf` using its own `"operation_code"`.
+Successful stopping also sends the original irrigation's totals and operator in
+`WS-finish-conf` (keeping `"status": "FINISHED"`). It does not require a
+subsequent `"ACTIVATE"`. An already Available station also confirms `"STOP"`
+with `"OK"`, without generating another finish summary. Faulted, blocked, or
+not-yet-activated stations return `"KO"`; STOP cannot activate, repair, or unblock
+a station. Duplicate operation codes replay their original confirmation and do
+not stop a newer irrigation.
 ---
 <br>
 

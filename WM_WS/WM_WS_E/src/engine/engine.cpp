@@ -195,6 +195,18 @@ std::expected<void, Engine::Error> Engine::stop() {
     return {};
 }
 
+std::expected<void, Engine::Error> Engine::stopFromCentral(server_token /*token*/) {
+    std::lock_guard lock(mutex_);
+    if (state == State::Fault)
+        return std::unexpected(Error{ErrorType::Fault});
+    if (blockedByServer)
+        return std::unexpected(Error{ErrorType::BlockedByCentral});
+    if (!activated_)
+        return std::unexpected(Error{ErrorType::NotActivated});
+    stopWateringUnlocked();
+    return {};
+}
+
 std::expected<void, Engine::Error> Engine::block(server_token /*token*/) {
     std::lock_guard lock(mutex_);
     if (state == State::Fault)

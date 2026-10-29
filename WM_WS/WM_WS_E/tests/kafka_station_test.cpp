@@ -1,6 +1,7 @@
 #include "kafka/station.hpp"
 #include "kafka/journal.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
@@ -50,6 +51,89 @@ TEST_F(KafkaStation, UsesReadmeOperationsAndExactConfirmationShape) {
     EXPECT_FALSE(engine.isRunning());
     ASSERT_TRUE(station.handle(command("IRRIGATION", 5)));
     EXPECT_TRUE(engine.isRunning());
+}
+
+TEST_F(KafkaStation, StopFinishesOriginalSessionAndKeepsStationAvailable) {
+    ASSERT_TRUE(station.handle(command("IRRIGATION", 1)));
+    std::this_thread::sleep_for(std::chrono::milliseconds{20});
+    station.events().clear();
+    auto stop = boost::json::parse(command("STOP", 2)).as_object();
+    stop["operator_id"] = 99;
+    ASSERT_TRUE(station.handle(boost::json::serialize(stop)));
+    EXPECT_FALSE(engine.isRunning());
+    EXPECT_TRUE(engine.isActivated());
+    EXPECT_FALSE(engine.isBlocked());
+    EXPECT_FALSE(station.checkpoint().at("blocked").as_bool());
+    const auto isFinish = [](const auto &event) { return event.topic == "ws-finish-conf"; };
+    EXPECT_EQ(std::count_if(station.events().begin(), station.events().end(), isFinish), 1);
+    const auto finish = std::find_if(station.events().begin(), station.events().end(), isFinish);
+    ASSERT_NE(finish, station.events().end());
+    EXPECT_EQ(finish->value.at("operator_id").to_number<int>(), 7);
+    EXPECT_GT(finish->value.at("total_liters").to_number<double>(), 0);
+    EXPECT_GT(finish->value.at("total_time").to_number<double>(), 0);
+    const boost::json::object expected{{"station_id", 1}, {"operation_code", 2},
+        {"status", "OK"}, {"reason", nullptr}};
+    EXPECT_EQ(station.events().back().topic, "ws-start-conf");
+    EXPECT_EQ(station.events().back().value, expected);
+    ASSERT_TRUE(station.handle(command("IRRIGATION", 3)));
+    EXPECT_TRUE(engine.isRunning());
+    ASSERT_TRUE(station.handle(boost::json::serialize(stop)));
+    EXPECT_EQ(station.events().back().value, expected);
+    EXPECT_TRUE(engine.isRunning());
+}
+
+TEST_F(KafkaStation, StopAcknowledgesAvailableButCannotActivateBlockedOrFaultedStation) {
+    ASSERT_TRUE(station.handle(command("STOP", 1)));
+    EXPECT_EQ(station.events().back().value.at("status").as_string(), "OK");
+    EXPECT_TRUE(engine.isActivated());
+    EXPECT_EQ(station.events().size(), 1);
+    ASSERT_TRUE(station.handle(command("BLOCK", 2)));
+    ASSERT_TRUE(station.handle(command("STOP", 3)));
+    EXPECT_EQ(station.events().back().value.at("status").as_string(), "KO");
+    EXPECT_TRUE(engine.isBlocked());
+    EXPECT_FALSE(engine.isActivated());
+    engine.injectFault();
+    ASSERT_TRUE(station.handle(command("STOP", 4)));
+    EXPECT_EQ(station.events().back().value.at("status").as_string(), "KO");
+    EXPECT_TRUE(engine.isBlocked());
+    EXPECT_FALSE(engine.isHealthy());
+}
+
+TEST_F(KafkaStation, StopCannotReactivateRepairedStationAwaitingAuthorization) {
+    engine.injectFault();
+    EXPECT_FALSE(engine.checkHealth());
+    engine.repair();
+    EXPECT_TRUE(engine.isHealthy());
+    EXPECT_FALSE(engine.isActivated());
+    ASSERT_TRUE(station.handle(command("STOP", 1)));
+    EXPECT_EQ(station.events().back().value.at("status").as_string(), "KO");
+    EXPECT_FALSE(engine.isActivated());
+}
+
+TEST_F(KafkaStation, LeakDuringStopPreparationCannotBeConfirmedAsAvailable) {
+    ASSERT_TRUE(station.handle(command("IRRIGATION", 1)));
+    ASSERT_TRUE(station.handle(command("STOP", 2), [&] { engine.injectFault(); }));
+    EXPECT_EQ(station.events().back().value.at("status").as_string(), "KO");
+    EXPECT_FALSE(engine.isHealthy());
+    EXPECT_FALSE(engine.isActivated());
+}
+
+TEST_F(KafkaStation, InterruptedStopDoesNotResumeOrStopANewerIrrigation) {
+    ASSERT_TRUE(station.handle(command("IRRIGATION", 1)));
+    boost::json::object pending;
+    ASSERT_TRUE(station.handle(command("STOP", 2), [&] { pending = station.checkpoint(); }));
+    Engine restoredEngine;
+    kafka::Station restored(restoredEngine, "1");
+    ASSERT_TRUE(restored.restore(pending));
+    EXPECT_FALSE(restoredEngine.isRunning());
+    EXPECT_FALSE(restoredEngine.isBlocked());
+    EXPECT_EQ(restored.events().back().topic, "ws-finish-conf");
+    restoredEngine.setMonitorConnected(true);
+    ASSERT_TRUE(restoredEngine.activateFromMonitor());
+    ASSERT_TRUE(restored.handle(command("IRRIGATION", 3)));
+    ASSERT_TRUE(restored.handle(command("STOP", 2)));
+    EXPECT_EQ(restored.events().back().value.at("status").as_string(), "KO");
+    EXPECT_TRUE(restoredEngine.isRunning());
 }
 
 TEST_F(KafkaStation, RejectsBlockUntilLeakIsRepaired) {
