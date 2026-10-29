@@ -55,6 +55,13 @@ def _db_writer_worker():
                                     UPDATE stations SET status = ? WHERE id = ?
                                     """, (status, station_id))           
                 
+                elif op == "SET_STATION_PREVIOUS_STATUS":
+                    
+                    station_id, previous_status = data
+                    cursor.execute( """
+                                    UPDATE stations SET previous_status = ? WHERE id = ?
+                                    """, (previous_status, station_id))
+                       
                 conn.commit()
             
             except Exception as e:
@@ -134,6 +141,10 @@ def store_station(station_id: int, station_location: str, station_status: str = 
 def set_station_status(station_id: int, status: str):
     
     _db_queue.put(("SET_STATION_STATUS", (station_id, status)))
+     
+def set_station_previous_status(station_id: int, previous_status: str):
+    
+    _db_queue.put(("SET_STATION_PREVIOUS_STATUS", (station_id, previous_status)))
                
 def store_operator(operator_id: int):
     
@@ -260,6 +271,7 @@ if __name__ == "__main__":
     store_station(10, "Alicante")
     store_station(11, "Barcelona", "Leak")
     set_station_status(11, "Available")
+    set_station_previous_status(10, "Out of service")
     store_operator(13)
     
     _db_queue.join()
