@@ -11,14 +11,14 @@ _db_queue = queue.Queue()
 _writer_started = False
 
 
-def get_db_connection():
+def _get_db_connection():
     
     os.makedirs(DB_DIR, exist_ok=True) 
     return sqlite3.connect(DB_PATH)
 
 def _db_writer_worker():
     
-    conn = get_db_connection()
+    conn = _get_db_connection()
     conn.execute("PRAGMA journal_mode=WAL;") # This is done to improve the concurrency in SQLite
     try:
         
@@ -73,13 +73,12 @@ def _db_writer_worker():
         
         conn.close()
 
-
 def init_database():
     
     global _writer_started
     
     
-    conn = get_db_connection()
+    conn = _get_db_connection()
     try:
         
         cursor = conn.cursor()
@@ -117,6 +116,7 @@ def init_database():
 def stop_database():
     
     _db_queue.put(None)
+    _db_queue.join()
 
 def store_station(station_id: int, station_location: str, station_status: str = "Disconnected"):
     
@@ -125,15 +125,37 @@ def store_station(station_id: int, station_location: str, station_status: str = 
 def set_station_status(station_id: int, status: str):
     
     _db_queue.put(("SET_STATION_STATUS", (station_id, status)))
-        
-        
+               
 def store_operator(operator_id: int):
     
     _db_queue.put(("INSERT_OPERATOR", operator_id))
-        
-def read_stations():
+
+def read_station(station_id: int):
     
-    conn = get_db_connection()
+    conn = _get_db_connection()
+    conn.execute("PRAGMA journal_mode=WAL;")
+        
+    try:
+        
+        cursor = conn.cursor()
+        cursor.execute("""
+                       SELECT * FROM stations WHERE id = ?
+                       """, (station_id,))
+        
+        return cursor.fetchall()[0]
+        
+    except Exception as e:
+        
+        print("DB ERROR: ", e)
+        return []
+        
+    finally:
+        
+        conn.close()
+
+def read_all_stations():
+    
+    conn = _get_db_connection()
     conn.execute("PRAGMA journal_mode=WAL;")
     
     try:
@@ -153,11 +175,10 @@ def read_stations():
     finally:
         
         conn.close()
-        
-        
+              
 def check_station(station_id: int) -> bool:
     
-    conn = get_db_connection()
+    conn = _get_db_connection()
     conn.execute("PRAGMA journal_mode=WAL;")
     
     try:
@@ -177,12 +198,10 @@ def check_station(station_id: int) -> bool:
     finally:
         
         conn.close()    
-    
-    
         
 def check_operator(operator_id: int) -> bool:
     
-    conn = get_db_connection()
+    conn = _get_db_connection()
     conn.execute("PRAGMA journal_mode=WAL;")
     
     try:
@@ -208,7 +227,7 @@ def _erase_db():
     THIS IS A PRIVATE FUNCTION THAT SHOULD NOT BE USED UNLESS YOU WANT TO DELETE ALL YOUR DB
     
     """
-    conn = get_db_connection()
+    conn = _get_db_connection()
 
     try:
         
@@ -236,7 +255,8 @@ if __name__ == "__main__":
     
     _db_queue.join()
     
-    print("Stored stations: ", read_stations())
+    print("Station with id 10: ", read_station(10)) 
+    print("Stored stations: ", read_all_stations())
     print(check_operator(13), check_operator(14))
     _erase_db()
     
