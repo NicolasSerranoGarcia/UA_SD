@@ -83,16 +83,27 @@ def process_nap_frame(client_socket: socket.socket, fields: list) -> tuple[bool,
             
             if db.check_station(station_id):
                 
+                current_status = db.read_station(station_id)[2]
+                
                 if status_msg == "KO":
                     
-                    db.set_station_status(station_id, "Leak")
+                    if current_status != "Leak":
+                        
+                        db.set_station_status(station_id, "Leak")
+                        db.set_station_previous_status(station_id, current_status or "Available")
+                        f"[NAP] Leak detected in station {station_id}."
+                        
                     send_nap_msg(client_socket, f"NAP#1.0#{ack_code}#3#{station_id}")
-                    f"[NAP] Leak detected in station {station_id}."
-                    return False, station_id
+                    return True, station_id
                 
                 else:
                     
-                    db.set_station_status(station_id, "Available")
+                    if current_status == "Leak":
+                        
+                        previous_status = db.read_station(station_id)[3] or "Available"
+                        db.set_station_status(station_id, previous_status)
+                        print(f"[NAP] Station {station_id} recovered from Leak. Restored to status '{previous_status}'.")
+                    
                     send_nap_msg(client_socket, f"NAP#1.0#{ack_code}#3#{station_id}")
                     return True, station_id
                 
@@ -101,14 +112,9 @@ def process_nap_frame(client_socket: socket.socket, fields: list) -> tuple[bool,
                 send_nap_msg(client_socket, f"NAP#1.0#{ack_code}#4#2#{station_id}")
                 return False, station_id
         
-        elif prot_code == 3:
+        elif prot_code in (3, 4):
             
-            # TODO
-            return False, None
-            
-        elif prot_code == 4:
-            
-            # TODO
+            # This should not happen. In case it happens, central ignores it
             return False, None
             
         else:
