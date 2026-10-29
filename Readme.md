@@ -61,8 +61,9 @@ The JSON structure used in this topic is the following:
 ```
 `"command_type"` can be one of the following values:
 - `"IRRIGATION"` → Start irrigation.
-- `"BLOCK"` → Block a station. (`"duration"` is ignored.)
+- `"BLOCK"` → Block a station. (`"duration"` is ignored.). If the station is irrigating, it stops and enters state `Out of service`
 - `"ACTIVATE"` → Unblock a station. (`"duration"` is ignored.)
+- `"STOP"` → Stops the irrigation of an station, but the stations enters state `Available`
 - `"GET-STATIONS"` → Request the list of available stations from the Central system. (`"duration"` is ignored.)
 ---
 <br>
@@ -142,8 +143,9 @@ The JSON structure used in this topic is the following:
 `"type"` can be one of the following:
 
 - `"IRRIGATION"` → Start irrigation.
-- `"BLOCK"` → Block a station. (`"duration"` is ignored.)
+- `"BLOCK"` → Block a station. (`"duration"` is ignored.). If the station is irrigating, it stops and enters state `Out of service`
 - `"ACTIVATE"` → Unblock a station. (`"duration"` is ignored.)
+- `"STOP"` → Stops the irrigation of an station, but the stations enters state `Available`
 ---
 <br>
 
