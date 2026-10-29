@@ -58,3 +58,5 @@ py .\WM_Central\clienteprueba.py localhost 8080 NAP#<protocol-version>#<ack-code
 
 *Give me also the header with format*
 --- 
+
+### *Provide me a Python function that recieves a topic, a message and a possible key, and uses a producer to send the message to the kafka topic kafka*
