@@ -61,8 +61,9 @@ The JSON structure used in this topic is the following:
 ```
 `"command_type"` can be one of the following values:
 - `"IRRIGATION"` → Start irrigation.
-- `"BLOCK"` → Block a station. (`"duration"` is ignored.)
+- `"BLOCK"` → Block a station. (`"duration"` is ignored.). If the station is irrigating, it stops and enters state `Out of service`
 - `"ACTIVATE"` → Unblock a station. (`"duration"` is ignored.)
+- `"STOP"` → Stops the irrigation of an station, but the stations enters state `Available`
 - `"GET-STATIONS"` → Request the list of available stations from the Central system. (`"duration"` is ignored.)
 ---
 <br>
@@ -80,6 +81,8 @@ The JSON structure used in this topic is the following:
   "operator_id": "<integer: ID of the operator the message is addressed to>",
   "type": "<string: Message type>",
   "operation_code": "<integer|null: ID of the confirmed or rejected operation; null if the message is not a response>",
+  "status": "<string: OK if the operation was successfull, KO if not>",
+  "reason": "<string: Reason for KO response>"
   "stations": "<array|null: List of requested stations (only for GET-STATIONS)>",
   "summary": "<tuple|null: Summary data for an irrigation session>"
 }
@@ -90,6 +93,10 @@ The JSON structure used in this topic is the following:
 
 - `"RESPONSE"` → Used for responses or command confirmations. (`"summary"` is ignored.)
 - `"SUMMARY"` → Used for summary data. (`"stations"` is ignored.)
+  
+`"stations"` → list of tuples with the form (`<station_id>`, `<location>`,`<status>`)<br>
+`"summary"` → tuple with the form (`<station_id>`, `<total_time (mins)>`,`<total_liters (L)>`)
+
 ---
 <br>
 
@@ -136,9 +143,9 @@ The JSON structure used in this topic is the following:
 `"type"` can be one of the following:
 
 - `"IRRIGATION"` → Start irrigation.
-- `"BLOCK"` → Block a station. (`"duration"` is ignored.)
+- `"BLOCK"` → Block a station. (`"duration"` is ignored.). If the station is irrigating, it stops and enters state `Out of service`
 - `"ACTIVATE"` → Unblock a station. (`"duration"` is ignored.)
-
+- `"STOP"` → Stops the irrigation of an station, but the stations enters state `Available`
 ---
 <br>
 
