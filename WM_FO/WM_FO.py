@@ -1,6 +1,7 @@
 import argparse
 import time
 import queue
+import uuid
 from confluent_kafka import Consumer, Producer, KafkaException
 from modules.utils import *
 from modules.kafka_clients import *
@@ -18,7 +19,6 @@ def main():
     args = argparser.parse_args()
 
     global operator_id; operator_id = args.ID
-    global next_operation_code; next_operation_code = 1
     global station_served
     
     kafka_config = {
@@ -82,8 +82,7 @@ def main():
                         flush_cmd()
                         continue
     
-                    operation_code = next_operation_code
-                    next_operation_code += 1
+                    operation_code = uuid.uuid4().int
                     
                     send_command(producer=producer, 
                                 operator_id=operator_id, 
@@ -190,8 +189,7 @@ def main():
                         flush_cmd()
                         continue
                     
-                    operation_code = next_operation_code
-                    next_operation_code += 1
+                    operation_code = uuid.uuid4().int
                         
                     send_command(producer=producer, 
                                 operator_id=operator_id, 
@@ -252,8 +250,7 @@ def main():
                         flush_cmd()
                         continue
                     
-                    operation_code = next_operation_code
-                    next_operation_code += 1
+                    operation_code = uuid.uuid4().int
                     
                     send_command(producer=producer, 
                                 operator_id=operator_id, 
@@ -303,8 +300,7 @@ def main():
                 # SHOW ALL THE STATIONS   
                 case '4':
                     
-                    operation_code = next_operation_code
-                    next_operation_code += 1
+                    operation_code = uuid.uuid4().int
                     
                     send_command(producer=producer, 
                                 operator_id=operator_id, 
@@ -375,8 +371,7 @@ def main():
                             
                             for command in commands:
                                 
-                                operation_code = next_operation_code
-                                next_operation_code += 1
+                                operation_code = uuid.uuid4().int
                                 
                                 if isinstance(command, tuple):
                                     
