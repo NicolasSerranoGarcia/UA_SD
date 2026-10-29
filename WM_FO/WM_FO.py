@@ -112,7 +112,7 @@ def main():
                                 if response.get("status") == "OK":
                                     
                                     station_served = station_id
-                                    print(f"[SUCCESS] Station {station_id} started irrigating")
+                                    print(f"[SUCCESS] Station WS-{station_id} started irrigating")
                                     
                                     while True:
                                         
@@ -159,7 +159,7 @@ def main():
                                     
                                 elif response.get("status") == "KO":
                                     
-                                    print(f"[ERROR] Failed in start irrigation in station {station_id}. Reason: {response.get("reason")}")
+                                    print(f"[ERROR] Failed in start irrigation in station WS-{station_id}. Reason: {response.get("reason")}")
                                     
                                 break
                         
@@ -219,10 +219,10 @@ def main():
                                 if response.get("status") == "OK":
                                     
                                     station_served = station_id
-                                    print(f"[SUCCESS] Station {station_id} blocked successfully")
+                                    print(f"[SUCCESS] Station WS-{station_id} blocked successfully")
                                     
                                 elif response.get("status") == "KO":
-                                    print(f"[ERROR] Failed blocking station {station_id}. Reason: {response.get("reason")}")
+                                    print(f"[ERROR] Failed blocking station WS-{station_id}. Reason: {response.get("reason")}")
                                     
                                 break
                         
@@ -281,10 +281,10 @@ def main():
                                 if response.get("status") == "OK":
                                     
                                     station_served = station_id
-                                    print(f"[SUCCESS] Station {station_id} activated successfully")
+                                    print(f"[SUCCESS] Station WS-{station_id} activated successfully")
                                     
                                 elif response.get("status") == "KO":
-                                    print(f"[ERROR] Failed activating station {station_id}. Reason: {response.get("reason")}")
+                                    print(f"[ERROR] Failed activating station WS-{station_id}. Reason: {response.get("reason")}")
                                     
                                 break
                         
@@ -401,7 +401,7 @@ def main():
                                                 operation_code=operation_code,
                                                 duration=duration)
                                 
-                                print(f"Irrigation request sent to station {station_id}" + (f" with duration {duration}" if duration else ""))
+                                print(f"Irrigation request sent to station WS-{station_id}" + (f" with duration {duration}" if duration else ""))
                                 print("Waiting for the central to respond...")
                                 
                                 time_out = 5.0
@@ -420,12 +420,12 @@ def main():
                                             
                                             if response.get("status") == "OK":
                                                 
-                                                print(f"[SUCCESS] Station {station_id} started irrigating")
+                                                print(f"[SUCCESS] Station WS-{station_id} started irrigating")
                                 
                                                 
                                             elif response.get("status") == "KO":
                                                 
-                                                print(f"[ERROR] Failed in start irrigation in station {station_id}. Reason: {response.get("reason")}")
+                                                print(f"[ERROR] Failed in start irrigation in station WS-{station_id}. Reason: {response.get("reason")}")
                                                 
                                             break
                                     
