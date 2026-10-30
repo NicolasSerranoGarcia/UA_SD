@@ -2,6 +2,7 @@
 
 Exported on 2026-09-28 from the conversation available to the assistant.
 Updated on 2026-10-20 with five prompts from the subsequent watering station work.
+Report-preparation prompts from 2026-10-30 are recorded separately below.
 
 ## Scope and format
 
@@ -18,6 +19,7 @@ Updated on 2026-10-20 with five prompts from the subsequent watering station wor
 - [Kafka, SQLite, C++, and build tools](libraries-and-build-tools.md)
 - [Code and configuration requests](code-and-configuration-changes.md)
 - [Git and prompt documentation](git-and-documentation.md)
+- [Report preparation — 30 October 2026](report-documentation.md)
 
 ## Conversation order
 
