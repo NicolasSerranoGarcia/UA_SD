@@ -4,6 +4,8 @@ import modules.DBManager as db
 SEPARATOR = "#"
 FORMAT = 'utf-8'
 
+from modules.kafka_clients import send_event
+
 def calculate_lrc(msg: str) -> str:
     """Funcion that calculates the LRC of a message"""
     
@@ -26,6 +28,24 @@ def send_nap_msg(client_socket:socket.socket, msg: str):
     frame = f"{msg}{SEPARATOR}{lrc_val}{SEPARATOR}FIN"
     
     client_socket.sendall(frame.encode(FORMAT))
+
+def alert_operator_serving(station_id: int, reason: str):
+    
+    operator = db.get_station_serving_operator(station_id)
+    
+    if operator is None:
+        return
+    
+    msg = {
+        
+        "operator_id": operator,
+        "type": "ALERT",
+        "status": "KO",
+        "reason": reason,
+    }
+    
+    send_event(topic="central-notis", msg=msg, key=operator)
+    db.set_station_serving_operator(station_id, None)
 
 def process_nap_frame(client_socket: socket.socket, fields: list) -> tuple[bool, None | int]:
     """Function that processes a complete and validated NAP message"""
@@ -83,7 +103,7 @@ def process_nap_frame(client_socket: socket.socket, fields: list) -> tuple[bool,
             
             if db.check_station(station_id):
                 
-                current_status = db.read_station(station_id)[2]
+                current_status = db.get_station_status(station_id)
                 
                 if status_msg == "KO":
                     
@@ -91,7 +111,10 @@ def process_nap_frame(client_socket: socket.socket, fields: list) -> tuple[bool,
                         
                         db.set_station_status(station_id, "Leak")
                         db.set_station_previous_status(station_id, current_status or "Available")
-                        f"[NAP] Leak detected in station {station_id}."
+                        print(f"[NAP] Leak detected in station {station_id}.")
+                        
+                        alert_operator_serving(station_id, "LEAK")
+
                         
                     send_nap_msg(client_socket, f"NAP#1.0#{ack_code}#3#{station_id}")
                     return True, station_id
@@ -100,7 +123,13 @@ def process_nap_frame(client_socket: socket.socket, fields: list) -> tuple[bool,
                     
                     if current_status == "Leak":
                         
-                        previous_status = db.read_station(station_id)[3] or "Available"
+                        previous_status = db.get_station_previous_status(station_id) or "Available"
+                        
+                        # When a station recovers from a leak, if it was watering, now it is available
+                        if previous_status == "Watering":
+                            
+                            previous_status = "Available"
+                        
                         db.set_station_status(station_id, previous_status)
                         print(f"[NAP] Station {station_id} recovered from Leak. Restored to status '{previous_status}'.")
                     
