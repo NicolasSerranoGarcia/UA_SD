@@ -6,6 +6,7 @@
 #include <iostream>
 #include <atomic>
 #include <librdkafka/rdkafkacpp.h>
+#include <librdkafka/rdkafka.h>
 #include <map>
 #include <mutex>
 #include <stdexcept>
@@ -130,15 +131,18 @@ struct Service::Impl : RdKafka::DeliveryReportCb, RdKafka::EventCb {
                 partitions[topic->topic()] = static_cast<int>(topic->partitions()->size());
         }
         const auto found = partitions.find("central-ops");
-        if (found == partitions.end())
+        if (found == partitions.end() || found->second <= 0)
             return;
-        const auto desired = partitionFor(id, found->second);
-        if (!desired || *desired == commandPartition)
+        // Central supplies the canonical station ID as a key to its default partitioner.
+        const auto key = std::to_string(std::stoull(id));
+        const auto desired = rd_kafka_msg_partitioner_consistent(nullptr, key.data(), key.size(),
+            found->second, nullptr, nullptr);
+        if (desired == commandPartition)
             return;
         std::unique_ptr<RdKafka::TopicPartition> assignment{
-            RdKafka::TopicPartition::create("central-ops", *desired, RdKafka::Topic::OFFSET_STORED)};
+            RdKafka::TopicPartition::create("central-ops", desired, RdKafka::Topic::OFFSET_STORED)};
         if (consumer->assign({assignment.get()}) == RdKafka::ERR_NO_ERROR) {
-            commandPartition = *desired;
+            commandPartition = desired;
             logging::record() << "[Engine][Kafka] ws=" << id
                                        << " central-ops partition=" << commandPartition << std::endl;
         }
@@ -154,7 +158,7 @@ struct Service::Impl : RdKafka::DeliveryReportCb, RdKafka::EventCb {
         const auto partition = partitionFor(event.recipient, found->second);
         if (!partition)
             throw std::runtime_error(partition.error());
-        const auto value = boost::json::serialize(event.value);
+        const auto value = serializeEvent(event.value);
         save();
         const auto error = producer->produce(event.topic, *partition, RdKafka::Producer::RK_MSG_COPY,
             const_cast<char *>(value.data()), value.size(), event.recipient.data(),

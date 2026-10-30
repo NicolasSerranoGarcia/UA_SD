@@ -178,9 +178,110 @@ TEST_F(KafkaStation, RejectedBlockDuringLeakPreservesAnExistingBlock) {
     EXPECT_FALSE(engine.activateFromMonitor());
 }
 
+TEST_F(KafkaStation, PreservesUuidOperationAsAnExactJsonInteger) {
+    const std::string code = "340282366920938463463374607431768211455";
+    const auto request = "{\"type\":\"IRRIGATION\",\"station_id\":1,\"operation_code\":" + code +
+        ",\"operator_id\":7,\"duration\":120}";
+    ASSERT_TRUE(station.handle(request));
+    EXPECT_TRUE(engine.isRunning());
+    const auto reply = kafka::serializeEvent(station.events().front().value);
+    EXPECT_NE(reply.find("\"operation_code\":" + code), std::string::npos);
+    EXPECT_EQ(kafka::parseCommand(reply), station.events().front().value);
+    EXPECT_EQ(reply.find("\"" + code + "\""), std::string::npos);
+    ASSERT_TRUE(station.handle(request));
+    EXPECT_EQ(kafka::serializeEvent(station.events().back().value), reply);
+    EXPECT_TRUE(engine.isRunning());
+}
+
+TEST_F(KafkaStation, RecoversUuidRepliesAndRejectsReusingTheirCode) {
+    const std::string code = "268106713651113214421487534612806171001";
+    const auto request = "{\"type\":\"BLOCK\",\"station_id\":1,\"operation_code\":" + code + ",\"operator_id\":7}";
+    ASSERT_TRUE(station.handle(request));
+    const auto state = station.checkpoint();
+    Engine recoveredEngine;
+    kafka::Station recovered(recoveredEngine, "1");
+    ASSERT_TRUE(recovered.restore(state));
+    recoveredEngine.setMonitorConnected(true);
+    EXPECT_FALSE(recoveredEngine.activateFromMonitor());
+    ASSERT_TRUE(recovered.handle(request));
+    EXPECT_EQ(recovered.events().back().value.at("status").as_string(), "OK");
+    EXPECT_NE(kafka::serializeEvent(recovered.events().back().value).find("\"operation_code\":" + code), std::string::npos);
+    auto reused = request;
+    reused.replace(reused.find("BLOCK"), 5, "ACTIVATE");
+    EXPECT_FALSE(recovered.handle(reused));
+    EXPECT_TRUE(recoveredEngine.isBlocked());
+}
+
+TEST_F(KafkaStation, UuidParsingRespectsEscapedKeysAndNestedValues) {
+    constexpr std::string_view request = R"({"type":"BLOCK","station_id":1,"operation\u005fcode":268106713651113214421487534612806171001,"operator_id":7,"extra":{"operation_code":222222222222222222222222222222222222222}})";
+    ASSERT_TRUE(station.handle(request));
+    const auto reply = kafka::serializeEvent(station.events().back().value);
+    EXPECT_NE(reply.find("\"operation_code\":268106713651113214421487534612806171001"), std::string::npos);
+}
+
+TEST_F(KafkaStation, RejectsNonintegerOrOversizedOperationCodes) {
+    for (const auto *code : {"340282366920938463463374607431768211456", "-1", "1.5", "1e20",
+                            "\"268106713651113214421487534612806171001\""}) {
+        const auto request = std::string{"{\"type\":\"IRRIGATION\",\"station_id\":1,\"operation_code\":"} +
+            code + ",\"operator_id\":7}";
+        EXPECT_FALSE(station.handle(request)) << code;
+        EXPECT_FALSE(engine.isRunning());
+    }
+    const boost::json::object noncanonical{{"operation_code", "01"}};
+    EXPECT_THROW(kafka::serializeEvent(noncanonical), std::invalid_argument);
+}
+
+TEST_F(KafkaStation, FinishReportsMinutesWhileMeterKeepsSeconds) {
+    ASSERT_TRUE(station.handle(command("IRRIGATION")));
+    ASSERT_TRUE(engine.stop());
+    engine.restoreMeter({0, 80, 120});
+    station.tick();
+    const auto &final = station.events().back().value;
+    EXPECT_DOUBLE_EQ(final.at("total_time").to_number<double>(), 2);
+    EXPECT_DOUBLE_EQ(final.at("total_liters").to_number<double>(), 80);
+    EXPECT_DOUBLE_EQ(engine.reading().elapsedSeconds, 120);
+}
+
+TEST_F(KafkaStation, RecoveredFinishConvertsSavedSecondsToMinutes) {
+    ASSERT_TRUE(station.handle(command("IRRIGATION")));
+    auto state = station.checkpoint();
+    state["elapsed_s"] = 120;
+    state["volume_l"] = 80;
+    Engine recoveredEngine;
+    kafka::Station recovered(recoveredEngine, "1");
+    ASSERT_TRUE(recovered.restore(state));
+    EXPECT_DOUBLE_EQ(recovered.events().back().value.at("total_time").to_number<double>(), 2);
+    EXPECT_DOUBLE_EQ(recoveredEngine.reading().elapsedSeconds, 120);
+}
+
+TEST_F(KafkaStation, MigratesLegacyPendingFinishUnitsOnlyOnce) {
+    for (const bool versioned : {false, true}) {
+        auto state = station.checkpoint();
+        if (versioned) state["version"] = 1;
+        else state.erase("version");
+        state["pending"] = boost::json::array{boost::json::object{
+            {"topic", "ws-finish-conf"}, {"recipient", "1"},
+            {"value", boost::json::object{{"station_id", 1}, {"status", "FINISHED"},
+                {"total_time", 120}, {"total_liters", 80}, {"operator_id", 7}}}}};
+        Engine recoveredEngine;
+        kafka::Station recovered(recoveredEngine, "1");
+        ASSERT_TRUE(recovered.restore(state));
+        EXPECT_DOUBLE_EQ(recovered.events().back().value.at("total_time").to_number<double>(), 2);
+        Engine secondEngine;
+        kafka::Station second(secondEngine, "1");
+        ASSERT_TRUE(second.restore(recovered.checkpoint()));
+        EXPECT_DOUBLE_EQ(second.events().back().value.at("total_time").to_number<double>(), 2);
+    }
+}
+
 TEST_F(KafkaStation, IgnoresOtherRecipientsSharingPartition) {
     ASSERT_TRUE(station.handle(command("BLOCK", 1, 3)));
     EXPECT_TRUE(engine.isActivated());
+    EXPECT_TRUE(station.events().empty());
+}
+
+TEST_F(KafkaStation, IgnoresForeignRecipientBeforeValidatingItsOperation) {
+    EXPECT_TRUE(station.handle(R"({"station_id":2,"operation_code":"invalid"})"));
     EXPECT_TRUE(station.events().empty());
 }
 
@@ -420,7 +521,7 @@ TEST_F(KafkaStation, CentralOutageRejectsNewIrrigationWithoutCreatingSession) {
 
 TEST_F(KafkaStation, RejectsUnsupportedCheckpointVersions) {
     auto state = station.checkpoint();
-    state["version"] = 2;
+    state["version"] = 3;
     EXPECT_FALSE(station.restore(state));
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/engine.hpp"
+#include "kafka/protocol.hpp"
 
 #include <boost/json.hpp>
 #include <deque>
@@ -36,7 +37,7 @@ class Station {
     [[nodiscard]] std::expected<void, std::string> restore(const boost::json::object &state);
 
   private:
-    void reply(std::uint64_t operation, bool success, std::string_view reason = {});
+    void reply(const boost::json::value &operation, bool success, std::string_view reason = {});
     void finish();
 
     Engine &engine_;

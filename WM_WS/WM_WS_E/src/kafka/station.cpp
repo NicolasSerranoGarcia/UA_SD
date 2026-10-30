@@ -37,20 +37,21 @@ std::expected<int, std::string> partitionFor(std::string_view recipient, int cou
 Station::Station(Engine &engine, std::string id)
     : engine_(engine), id_(numericId(id)), numericId_(std::stoull(id_)) {}
 
-void Station::reply(std::uint64_t operation, bool success, std::string_view reason) {
+void Station::reply(const boost::json::value &operation, bool success, std::string_view reason) {
     boost::json::object value{{"station_id", numericId_}, {"operation_code", operation}, {"status", success ? "OK" : "KO"},
         {"reason", success ? boost::json::value{} : boost::json::value(reason)}};
-    replies_[std::to_string(operation)] = value;
+    replies_[operationKey(operation)] = value;
     events_.push_back({"ws-start-conf", id_, std::move(value)});
 }
 
 std::expected<void, std::string> Station::handle(std::string_view payload, BeforeAction beforeAction) {
-    std::optional<std::uint64_t> addressedOperation;
+    std::optional<boost::json::value> addressedOperation;
     try {
-        const auto received = boost::json::parse(payload).as_object();
+        auto received = boost::json::parse(payload).as_object();
         if (integer(received.at("station_id")) != numericId_)
             return {};
-        const auto operation = integer(received.at("operation_code"));
+        received = parseCommand(payload);
+        const auto operation = received.at("operation_code");
         addressedOperation = operation;
         const auto type = std::string(received.at("type").as_string());
         if (type != "IRRIGATION" && type != "ACTIVATE" && type != "BLOCK" && type != "STOP")
@@ -72,7 +73,7 @@ std::expected<void, std::string> Station::handle(std::string_view payload, Befor
         const boost::json::object command{{"station_id", numericId_}, {"type", type},
             {"operation_code", operation}, {"operator_id", owner},
             {"duration", duration ? boost::json::value(duration->count()) : boost::json::value{}}};
-        const auto code = std::to_string(operation);
+        const auto code = operationKey(operation);
         if (const auto previous = commands_.find(code); previous != commands_.end()) {
             if (previous->second != command)
                 throw std::invalid_argument("operation_code was reused for a different command");
@@ -171,7 +172,7 @@ void Station::finish() {
         return;
     const auto reading = engine_.sampleMeter().reading;
     boost::json::object value{{"station_id", numericId_}, {"status", "FINISHED"},
-        {"total_liters", reading.volumeLiters}, {"total_time", reading.elapsedSeconds},
+        {"total_liters", reading.volumeLiters}, {"total_time", reading.elapsedSeconds / 60.0},
         {"operator_id", session_->at("operator_id")}};
     events_.push_back({"ws-finish-conf", id_, std::move(value)});
     session_.reset();
@@ -221,7 +222,7 @@ boost::json::object Station::checkpoint(std::optional<Engine::Reading> sample) c
     if (intent_ && session_ && !engine_.isRunning() && intent_->at("type") == "IRRIGATION" &&
         intent_->at("operation_code") == session_->at("operation_code"))
         reading = {};
-    return {{"version", 1}, {"station_id", id_}, {"blocked", blocked_}, {"pending", pending},
+    return {{"version", 2}, {"station_id", id_}, {"blocked", blocked_}, {"pending", pending},
             {"replies", replies}, {"commands", commands},
             {"session", session_ ? boost::json::value(*session_) : boost::json::value{}},
             {"intent", intent_ ? boost::json::value(*intent_) : boost::json::value{}},
@@ -230,7 +231,9 @@ boost::json::object Station::checkpoint(std::optional<Engine::Reading> sample) c
 
 std::expected<void, std::string> Station::restore(const boost::json::object &state) {
     try {
-        if (const auto *version = state.if_contains("version"); version && version->to_number<int>() != 1)
+        const auto *schema = state.if_contains("version");
+        const int version = schema ? schema->to_number<int>() : 0;
+        if (version < 0 || version > 2)
             return std::unexpected("unsupported station checkpoint version");
         if (state.at("station_id").as_string() != id_)
             return std::unexpected("journal belongs to another station");
@@ -240,8 +243,11 @@ std::expected<void, std::string> Station::restore(const boost::json::object &sta
             engine_.restoreBlock();
         for (const auto &entry : state.at("pending").as_array()) {
             const auto &record = entry.as_object();
+            auto value = record.at("value").as_object();
+            if (version < 2 && record.at("topic") == "ws-finish-conf")
+                value["total_time"] = value.at("total_time").to_number<double>() / 60.0;
             events_.push_back({std::string(record.at("topic").as_string()),
-                std::string(record.at("recipient").as_string()), record.at("value").as_object()});
+                std::string(record.at("recipient").as_string()), std::move(value)});
         }
         for (const auto &entry : state.at("replies").as_object())
             replies_[std::string(entry.key())] = entry.value().as_object();
@@ -253,7 +259,7 @@ std::expected<void, std::string> Station::restore(const boost::json::object &sta
                 events_.push_back({"ws-start-conf", id_, {{"station_id", numericId_},
                     {"operation_code", nullptr}, {"status", "KO"}, {"reason", "Local start interrupted"}}});
             } else {
-                const auto code = std::to_string(integer(command.at("operation_code")));
+                const auto code = operationKey(command.at("operation_code"));
                 events_.push_back({"ws-start-conf", id_, replies_.at(code)});
             }
         }
@@ -261,7 +267,7 @@ std::expected<void, std::string> Station::restore(const boost::json::object &sta
             session_ = state.at("session").as_object();
             finish();
             events_.back().value["total_liters"] = state.at("volume_l");
-            events_.back().value["total_time"] = state.at("elapsed_s");
+            events_.back().value["total_time"] = state.at("elapsed_s").to_number<double>() / 60.0;
         }
         return {};
     } catch (const std::exception &error) {
