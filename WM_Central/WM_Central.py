@@ -21,7 +21,7 @@ COMMAND_STATUS_TRADUCTION = {
 }
 
 _operation_fo_dict: dict = {} # Stores for each operation code, the operator that sended the command and the command it sended (if exists)
-_operation_central_set: dict = {} # Stores the operation codes that have not yet received a response from the station along with the command type
+_operation_central_dict: dict = {} # Stores the operation codes that have not yet received a response from the station along with the command type
 
 def manage_WS(client_socket: socket.socket, addr):
     """Function that manages the connection through sockets with an station"""
@@ -46,6 +46,8 @@ def manage_WS(client_socket: socket.socket, addr):
                         
                         print(f"[NAP ERROR] No message recieved froms station WS-{current_station_id}. Connection lost.")
                         db.set_station_status(current_station_id, status="Disconnected")
+                        
+                        nap.alert_operator_serving(current_station_id, "DISCONNECTED")
                         
                     break
                 
@@ -82,6 +84,8 @@ def manage_WS(client_socket: socket.socket, addr):
                     print(f"[NAP TIMEOUT] Socket timeout expired. Connection lost with station WS-{current_station_id}")
                     db.set_station_status(current_station_id, status="Disconnected")
                     
+                    nap.alert_operator_serving(current_station_id, "DISCONNECTED")
+                    
                 break
         
     except Exception as e:
@@ -97,8 +101,7 @@ def telemetry_handler(data: dict):
     station_id = data.get("station_id")
     flux = data.get("flux_l_min")
     
-    station_data = db.read_station(station_id=station_id)
-    status = station_data[2]
+    status = db.get_station_status(station_id)
     
     if status == "Watering":
     
@@ -133,8 +136,28 @@ def fo_req_handler(data:dict):
     match command:
         
         case "IRRIGATION":
-           
-            station_status = db.read_station(station_id)[2]
+            
+            station_served = db.get_operator_station(operator_id)
+            
+            # This is done so an operator cannot serve two stations at the same time
+            if station_served is not None and station_served != station_id:
+                
+                target_topic = "central-notis"
+                key = operator_id
+                
+                msg = {
+                    "operator_id": operator_id,
+                    "type": "RESPONSE",
+                    "operation_code": operation_code,
+                    "status": "KO",
+                    "reason": f"You cannot serve another station, you are currently serving station WS-{station_served}",
+                }
+                
+                send_event(topic=target_topic, msg=msg, key=key)
+                return
+            
+            # If the operator is not serving an station or is the same station is serving
+            station_status = db.get_station_status(station_id)
             
             if station_status == "Available":
                 
@@ -176,7 +199,7 @@ def fo_req_handler(data:dict):
             
         case "BLOCK":
             
-            station_status = db.read_station(station_id)[2]
+            station_status = db.get_station_status(station_id)
             
             if station_status == "Available" or station_status == "Watering":
                 
@@ -217,7 +240,7 @@ def fo_req_handler(data:dict):
             
         case "ACTIVATE":
             
-            station_status = db.read_station(station_id)[2]
+            station_status = db.get_station_status(station_id)
             
             if station_status == "Out of service":
                 
@@ -259,7 +282,7 @@ def fo_req_handler(data:dict):
         
         case "STOP":
           
-            station_status = db.read_station(station_id)[2]
+            station_status = db.get_station_status(station_id)
             
             if station_status == "Watering":
                 
@@ -323,9 +346,11 @@ def ws_finish_conf_handler(data: dict):
     total_time = data.get("total_time")
     total_liters = data.get("total_liters")
     
-    if total_time == 0:
+    if total_time == 0 or total_time is None:
         
         print(f"[IRRIGATING ERROR] Total watering time cannot be 0. Station WS-{station_id}")
+        db.set_station_status(station_id, "Available")
+        db.set_station_serving_operator(station_id, None)
         return
     
     if status == "FINISHED":
@@ -334,7 +359,8 @@ def ws_finish_conf_handler(data: dict):
         print(f"[IRRIGATION FINISHED] Station WS-{station_id} finished irrigating")
         print(f"Summary:\n# Total liters irrigated: {total_liters} L\n# Total time irrigated: {total_time} min\n# Average flux: {total_liters/total_time} L/min")
         
-        operator_id = data.get("operator_id")
+        operator_id = data.get("operator_id") or db.get_station_serving_operator(station_id)
+        db.set_station_serving_operator(station_id, None)
         
         if operator_id is not None: # Send the operator the summary
             
@@ -368,9 +394,9 @@ def ws_start_conf_handler(data: dict):
         
     else: # Confirmation of an operation sent by the central or by a field operator
         
-        if operation_code in _operation_central_set: # The operation was sent by central
+        if operation_code in _operation_central_dict: # The operation was sent by central
             
-            command = _operation_central_set.pop(operation_code)
+            command = _operation_central_dict.pop(operation_code)
             
             if status == "OK":
                 
@@ -391,6 +417,14 @@ def ws_start_conf_handler(data: dict):
                 print(f"[COMMAND SUCCESS] Success in command {command} sent to station WS-{station_id} by operator FO-{operator_id}")
                 db_status = COMMAND_STATUS_TRADUCTION.get(command)
                 db.set_station_status(station_id, db_status)
+                
+                if command == "IRRIGATION":
+                    
+                    db.set_station_serving_operator(station_id, operator_id)
+                    
+                elif command in ("STOP", "BLOCK"):
+                    
+                    db.set_station_serving_operator(station_id, None)
                 
             elif status == "KO":
                
@@ -443,8 +477,6 @@ def main():
         "ws-finish-conf": ws_finish_conf_handler,
         "ws-start-conf": ws_start_conf_handler,
     }
-    
-    global _operation_dict
     
     try:
         

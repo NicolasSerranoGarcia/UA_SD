@@ -60,3 +60,7 @@ py .\WM_Central\clienteprueba.py localhost 8080 NAP#<protocol-version>#<ack-code
 --- 
 
 ### *Provide me a Python function that recieves a topic, a message and a possible key, and uses a producer to send the message to the kafka topic kafka*
+
+---
+
+### *Implement a graphical interface for the central unit, keeping in mind that it will be deployed on Railway. Add buttons that allow the central unit to send operations and commands to other central units.*
