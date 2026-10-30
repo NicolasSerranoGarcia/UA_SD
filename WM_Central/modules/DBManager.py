@@ -11,14 +11,14 @@ _db_queue = queue.Queue()
 _writer_started = False
 
 
-def get_db_connection():
+def _get_db_connection():
     
     os.makedirs(DB_DIR, exist_ok=True) 
     return sqlite3.connect(DB_PATH)
 
 def _db_writer_worker():
     
-    conn = get_db_connection()
+    conn = _get_db_connection()
     conn.execute("PRAGMA journal_mode=WAL;") # This is done to improve the concurrency in SQLite
     try:
         
@@ -55,6 +55,13 @@ def _db_writer_worker():
                                     UPDATE stations SET status = ? WHERE id = ?
                                     """, (status, station_id))           
                 
+                elif op == "SET_STATION_PREVIOUS_STATUS":
+                    
+                    station_id, previous_status = data
+                    cursor.execute( """
+                                    UPDATE stations SET previous_status = ? WHERE id = ?
+                                    """, (previous_status, station_id))
+                       
                 conn.commit()
             
             except Exception as e:
@@ -73,13 +80,12 @@ def _db_writer_worker():
         
         conn.close()
 
-
 def init_database():
     
     global _writer_started
     
     
-    conn = get_db_connection()
+    conn = _get_db_connection()
     try:
         
         cursor = conn.cursor()
@@ -97,6 +103,15 @@ def init_database():
                            id INTEGER PRIMARY KEY
                        )
                        """)
+        
+        # To not wipe the railway volume, this code just adds the new column if is not created
+        try:
+            
+            cursor.execute("ALTER TABLE stations ADD COLUMN previous_status TEXT CHECK (previous_status IN ('Available', 'Watering', 'Leak', 'Out of service', 'Disconnected'));")
+            
+        except sqlite3.OperationalError:
+            
+            pass
         
         conn.commit()
         
@@ -117,6 +132,7 @@ def init_database():
 def stop_database():
     
     _db_queue.put(None)
+    _db_queue.join()
 
 def store_station(station_id: int, station_location: str, station_status: str = "Disconnected"):
     
@@ -125,22 +141,48 @@ def store_station(station_id: int, station_location: str, station_status: str = 
 def set_station_status(station_id: int, status: str):
     
     _db_queue.put(("SET_STATION_STATUS", (station_id, status)))
-        
-        
+     
+def set_station_previous_status(station_id: int, previous_status: str):
+    
+    _db_queue.put(("SET_STATION_PREVIOUS_STATUS", (station_id, previous_status)))
+               
 def store_operator(operator_id: int):
     
     _db_queue.put(("INSERT_OPERATOR", operator_id))
-        
-def read_stations():
+
+def read_station(station_id: int):
     
-    conn = get_db_connection()
+    conn = _get_db_connection()
+    conn.execute("PRAGMA journal_mode=WAL;")
+        
+    try:
+        
+        cursor = conn.cursor()
+        cursor.execute("""
+                       SELECT * FROM stations WHERE id = ?
+                       """, (station_id,))
+        
+        return cursor.fetchall()[0]
+        
+    except Exception as e:
+        
+        print("DB ERROR: ", e)
+        return []
+        
+    finally:
+        
+        conn.close()
+
+def read_all_stations():
+    
+    conn = _get_db_connection()
     conn.execute("PRAGMA journal_mode=WAL;")
     
     try:
         
         cursor = conn.cursor()
         cursor.execute("""
-                       SELECT * FROM stations
+                       SELECT id, location, status FROM stations
                        """)
         
         return cursor.fetchall()
@@ -153,11 +195,10 @@ def read_stations():
     finally:
         
         conn.close()
-        
-        
+              
 def check_station(station_id: int) -> bool:
     
-    conn = get_db_connection()
+    conn = _get_db_connection()
     conn.execute("PRAGMA journal_mode=WAL;")
     
     try:
@@ -177,12 +218,10 @@ def check_station(station_id: int) -> bool:
     finally:
         
         conn.close()    
-    
-    
         
 def check_operator(operator_id: int) -> bool:
     
-    conn = get_db_connection()
+    conn = _get_db_connection()
     conn.execute("PRAGMA journal_mode=WAL;")
     
     try:
@@ -208,7 +247,7 @@ def _erase_db():
     THIS IS A PRIVATE FUNCTION THAT SHOULD NOT BE USED UNLESS YOU WANT TO DELETE ALL YOUR DB
     
     """
-    conn = get_db_connection()
+    conn = _get_db_connection()
 
     try:
         
@@ -232,11 +271,13 @@ if __name__ == "__main__":
     store_station(10, "Alicante")
     store_station(11, "Barcelona", "Leak")
     set_station_status(11, "Available")
+    set_station_previous_status(10, "Out of service")
     store_operator(13)
     
     _db_queue.join()
     
-    print("Stored stations: ", read_stations())
+    print("Station with id 10: ", read_station(10)) 
+    print("Stored stations: ", read_all_stations())
     print(check_operator(13), check_operator(14))
     _erase_db()
     

@@ -4,14 +4,27 @@ import argparse
 import socket
 import threading
 import modules.DBManager as db
-import modules.NAPManager as nap
+import modules.NAPManager as nap    
+from modules.kafka_clients import *
 from confluent_kafka import Consumer, Producer
 
 FORMAT = 'utf-8'
 BLOCK_TAM = 1024
 SEPARATOR = "#"
-                             
+STATION_POSSIBLE_STATUS = ["Available", "Watering", "Disconnected", "Leak", "Out of service"]
+COMMAND_STATUS_TRADUCTION = {
+    
+    "IRRIGATION": "Watering",
+    "BLOCK": "Out of service",
+    "ACTIVATE": "Available",
+    "STOP": "Available",
+}
+
+_operation_fo_dict: dict = {} # Stores for each operation code, the operator that sended the command and the command it sended (if exists)
+_operation_central_set: dict = {} # Stores the operation codes that have not yet received a response from the station along with the command type
+
 def manage_WS(client_socket: socket.socket, addr):
+    """Function that manages the connection through sockets with an station"""
     
     buffer = ""
     current_station_id = None
@@ -28,6 +41,12 @@ def manage_WS(client_socket: socket.socket, addr):
                 block = client_socket.recv(BLOCK_TAM).decode(FORMAT)
                 
                 if not block:
+                    
+                    if current_station_id:
+                        
+                        print(f"[NAP ERROR] No message recieved froms station WS-{current_station_id}. Connection lost.")
+                        db.set_station_status(current_station_id, status="Disconnected")
+                        
                     break
                 
                 buffer += block
@@ -60,8 +79,10 @@ def manage_WS(client_socket: socket.socket, addr):
                 
                 if keep_connection and current_station_id is not None:
                     
-                    print(f"[NAP TIMEOUT] Socket timeout expired. Connection lost with station {current_station_id}")
+                    print(f"[NAP TIMEOUT] Socket timeout expired. Connection lost with station WS-{current_station_id}")
                     db.set_station_status(current_station_id, status="Disconnected")
+                    
+                break
         
     except Exception as e:
         
@@ -70,24 +91,342 @@ def manage_WS(client_socket: socket.socket, addr):
     finally:
         
         client_socket.close()
+
+def telemetry_handler(data: dict):
+    
+    station_id = data.get("station_id")
+    flux = data.get("flux_l_min")
+    
+    station_data = db.read_station(station_id=station_id)
+    status = station_data[2]
+    
+    if status == "Watering":
+    
+        print(f"[IRRIGATING] Station {station_id:<6} Flux: {flux}")
+
+def fo_req_handler(data:dict):
+    
+    operator_id = data.get("operator_id")
+    station_id = data.get("station_id")
+    command = data.get("command_type")
+    operation_code = data.get("operation_code")
+    
+    # First if the operator does not exists in the DB we store it
+    if not db.check_operator(operator_id):
         
+        db.store_operator(operator_id)
+    
+    if command != "GET-STATIONS" and not db.check_station(station_id):
+        
+        msg = {
+            "operator_id": operator_id,
+            "type": "RESPONSE",
+            "operation_code": operation_code,
+            "status": "KO",
+            "reason": f"Sation {station_id} does not exist in the DB"
+        }
+        
+        send_event(topic="central-notis", msg=msg, key=operator_id)
+        
+        return
+    
+    match command:
+        
+        case "IRRIGATION":
+           
+            station_status = db.read_station(station_id)[2]
+            
+            if station_status == "Available":
+                
+                target_topic = "central-ops"
+                key = station_id
+                duration = data.get("duration")
+                
+                msg = {
+                    "operator_id": operator_id,
+                    "station_id": station_id,
+                    "type": command,
+                    "operation_code": operation_code,
+                    "duration": duration,
+                }
+                
+                _operation_fo_dict[operation_code] = (operator_id, command)              
+            
+            elif station_status in STATION_POSSIBLE_STATUS:
+                
+                target_topic = "central-notis"
+                key = operator_id
+                reason = (f"Station WS-{station_id} is already irrigating" if station_status == "Watering" 
+                        else f"Station WS-{station_id} is in status {station_status} so it cannot start an irrigation")
+                
+                msg = {
+                    "operator_id": operator_id,
+                    "type": "RESPONSE",
+                    "operation_code": operation_code,
+                    "status": "KO",
+                    "reason": reason,
+                }
+             
+            else:
+                
+                print(f"[STATUS ERROR] Unexpected status of station {station_id} in DB: {station_status}")
+                return
+            
+            send_event(topic=target_topic, msg=msg, key=key)
+            
+        case "BLOCK":
+            
+            station_status = db.read_station(station_id)[2]
+            
+            if station_status == "Available" or station_status == "Watering":
+                
+                target_topic = "central-ops"
+                key = station_id
+                
+                msg = {
+                    "operator_id": operator_id,
+                    "station_id": station_id,
+                    "type": command,
+                    "operation_code": operation_code,
+                }
+                
+                _operation_fo_dict[operation_code] = (operator_id, command)
+            
+            
+            elif station_status in STATION_POSSIBLE_STATUS:
+                
+                target_topic = "central-notis"
+                key = operator_id
+                reason = (f"Station WS-{station_id} is already blocked" if station_status == "Out of service" 
+                        else f"Station WS-{station_id} is in status {station_status} so it cannot be blocked")
+                
+                msg = {
+                    "operator_id": operator_id,
+                    "type": "RESPONSE",
+                    "operation_code": operation_code,
+                    "status": "KO",
+                    "reason": reason,
+                }
+             
+            else:
+                
+                print(f"[STATUS ERROR] Unexpected status of station {station_id} in DB: {station_status}")
+                return
+            
+            send_event(topic=target_topic, msg=msg, key=key)
+            
+        case "ACTIVATE":
+            
+            station_status = db.read_station(station_id)[2]
+            
+            if station_status == "Out of service":
+                
+                target_topic = "central-ops"
+                key = station_id
+                
+                msg = {
+                    "operator_id": operator_id,
+                    "station_id": station_id,
+                    "type": command,
+                    "operation_code": operation_code,
+                }
+                
+                _operation_fo_dict[operation_code] = (operator_id, command)
+            
+            
+            elif station_status in STATION_POSSIBLE_STATUS:
+                
+                target_topic = "central-notis"
+                key = operator_id
+                reason = (f"Station WS-{station_id} is already activated" + (" and watering" if station_status == "Watering" else "") 
+                        if station_status in ["Available", "Watering"] 
+                        else f"Station WS-{station_id} is in status {station_status} so it cannot be activated")
+                
+                msg = {
+                    "operator_id": operator_id,
+                    "type": "RESPONSE",
+                    "operation_code": operation_code,
+                    "status": "KO",
+                    "reason": reason,
+                }
+             
+            else:
+                
+                print(f"[STATUS ERROR] Unexpected status of station {station_id} in DB: {station_status}")
+                return
+            
+            send_event(topic=target_topic, msg=msg, key=key)
+        
+        case "STOP":
+          
+            station_status = db.read_station(station_id)[2]
+            
+            if station_status == "Watering":
+                
+                target_topic = "central-ops"
+                key = station_id
+                
+                msg = {
+                    "operator_id": operator_id,
+                    "station_id": station_id,
+                    "type": command,
+                    "operation_code": operation_code,
+                }
+            
+                _operation_fo_dict[operation_code] = (operator_id, command)
+            
+            elif station_status in STATION_POSSIBLE_STATUS:
+                
+                target_topic = "central-notis"
+                key = operator_id
+                reason = f"Stations can only be stoped when they are watering. Station {station_id} is currently in status {station_status}"
+                
+                msg = {
+                    "operator_id": operator_id,
+                    "type": "RESPONSE",
+                    "operation_code": operation_code,
+                    "status": "KO",
+                    "reason": reason,
+                }
+             
+            else:
+                
+                print(f"[STATUS ERROR] Unexpected status of station {station_id} in DB: {station_status}")
+                return
+            
+            send_event(topic=target_topic, msg=msg, key=key)  
+        
+        case "GET-STATIONS":
 
+            target_topic = "central-notis"
+            key = operator_id
+            stations: list = db.read_all_stations()
+            
+            msg = {
+                "operator_id":operator_id,
+                "type":"RESPONSE",
+                "operation_code":operation_code,
+                "status":"OK",
+                "stations":stations,
+            }
+            
+            send_event(topic=target_topic, msg=msg, key=key)
 
-
+        case _:
+            
+            print("[FO ERROR] Invalid operation received")
+    
+def ws_finish_conf_handler(data: dict):
+    
+    station_id = data.get("station_id")
+    status = data.get("status")
+    total_time = data.get("total_time")
+    total_liters = data.get("total_liters")
+    
+    if total_time == 0:
+        
+        print(f"[IRRIGATING ERROR] Total watering time cannot be 0. Station WS-{station_id}")
+        return
+    
+    if status == "FINISHED":
+        
+        db.set_station_status(station_id, "Available")
+        print(f"[IRRIGATION FINISHED] Station WS-{station_id} finished irrigating")
+        print(f"Summary:\n# Total liters irrigated: {total_liters} L\n# Total time irrigated: {total_time} min\n# Average flux: {total_liters/total_time} L/min")
+        
+        operator_id = data.get("operator_id")
+        
+        if operator_id is not None: # Send the operator the summary
+            
+            target_topic = "central-notis"
+            summary = (station_id, total_time, total_liters)
+            
+            msg = {
+                "operator_id": operator_id,
+                "type":"SUMMARY",
+                "status":"OK",
+                "summary":summary,
+            }
+            
+            send_event(topic=target_topic, msg=msg, key=operator_id)
+        
+def ws_start_conf_handler(data: dict):
+    
+    station_id = data.get("station_id")
+    
+    operation_code = data.get("operation_code")
+    
+    status = data.get("status")
+    
+    if operation_code is None: # Irrigation started by the station itself
+        
+        if status == "OK":
+            
+            db.set_station_status(station_id, "Watering")
+            print(f"[IRRIGATION STARTED] Station WS-{station_id} started irrigating")
+    
+        
+    else: # Confirmation of an operation sent by the central or by a field operator
+        
+        if operation_code in _operation_central_set: # The operation was sent by central
+            
+            command = _operation_central_set.pop(operation_code)
+            
+            if status == "OK":
+                
+                print(f"[COMMAND SUCCESS] Success in command {command} sent to station WS-{station_id}")
+                db_status = COMMAND_STATUS_TRADUCTION.get(command)
+                db.set_station_status(station_id, db_status)
+                
+            elif status == "KO":
+                
+                print(f"[COMMAND FAILURE] Error in station WS-{station_id} trying command {command}: Reason: {data.get("reason")}")
+             
+        elif operation_code in _operation_fo_dict: # The operation was sent by a field operator
+            
+            operator_id, command = _operation_fo_dict.pop(operation_code)
+            
+            if status == "OK":
+                
+                print(f"[COMMAND SUCCESS] Success in command {command} sent to station WS-{station_id} by operator FO-{operator_id}")
+                db_status = COMMAND_STATUS_TRADUCTION.get(command)
+                db.set_station_status(station_id, db_status)
+                
+            elif status == "KO":
+               
+               print(f"[COMMAND FAILURE] Error in station WS-{station_id} trying command {command} by operator FO-{operator_id}: Reason: {data.get("reason")}")
+                
+            msg = {
+                "operator_id": operator_id,
+                "type": "RESPONSE",
+                "operation_code": operation_code,
+                "status": status,
+                "reason": data.get("reason"),
+            }
+        
+            send_event(topic="central-notis", msg=msg, key=operator_id)
+ 
+        else:
+            
+            print(f"[UNEXPECTED ERROR] Operation code {operation_code} sent by station WS-{station_id} not recognized")
+    
 def main():
     
     argparser = argparse.ArgumentParser(description="Central for Water Management Network")
     
+    argparser.add_argument("--server-ip", type=str, default=os.getenv("SERVER_IP", "0.0.0.0"), help="Listening ip of the socket server")
     argparser.add_argument("--port", type=int, default=int(os.getenv("PORT", 8080)), help="Listening port of the socket server")
     argparser.add_argument("--kafka-ip", type=str, default=os.getenv("KAFKA_IP", "iriguchi.proxy.rlwy.net"), help="IP of the kafka bootstrap server")
     argparser.add_argument("--kafka-port", type=int, default=int(os.getenv("KAFKA_PORT", 37040)),help="Port of the kafka bootstrap server")
     
     args = argparser.parse_args()
     
-    server_ip = "0.0.0.0"
+    server_ip = args.server_ip
     server_port = args.port
     kafka_ip = args.kafka_ip
     kafka_port = args.kafka_port
+    
+    bootstrap_servers = f"{kafka_ip}:{kafka_port}"
     
     validation_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     validation_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) # Avoids OSError: [Errno 98] Address already in use
@@ -97,6 +436,26 @@ def main():
     
     print(f"Server listening through {server_ip}:{server_port}")
     
+    stop_event = threading.Event()
+    topic_handlers = {
+        "telemetry": telemetry_handler,
+        "fo-req": fo_req_handler,
+        "ws-finish-conf": ws_finish_conf_handler,
+        "ws-start-conf": ws_start_conf_handler,
+    }
+    
+    global _operation_dict
+    
+    try:
+        
+        start_kafka(bootstrap_servers, stop_event, topic_handlers)
+    
+    except Exception as e:
+        
+        print(f"[KAFKA ERROR] {e}")
+        return 
+    
+    # Sockets management
     try:
     
         while True:
@@ -114,16 +473,15 @@ def main():
             
     except KeyboardInterrupt:
         
-        db.stop_database()
         print("Interruption forced. Exiting the program...")
     
     except Exception as e:
         
-        db.stop_database()
         print("Unexpected error:", e)
         
     finally:
         
+        stop_kafka()
         validation_server.close()
 
 
@@ -131,4 +489,5 @@ if __name__ == "__main__":
     
     db.init_database()
     main()
+    db.stop_database()
 
