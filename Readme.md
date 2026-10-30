@@ -82,7 +82,7 @@ The JSON structure used in this topic is the following:
   "type": "<string: Message type>",
   "operation_code": "<integer|null: ID of the confirmed or rejected operation; null if the message is not a response>",
   "status": "<string: OK if the operation was successfull, KO if not>",
-  "reason": "<string: Reason for KO response>"
+  "reason": "<string: Reason for KO response | Alert for "ALERT" type: "LEAK" or "DISCONNECTED">"
   "stations": "<array|null: List of requested stations (only for GET-STATIONS)>",
   "summary": "<tuple|null: Summary data for an irrigation session>"
 }
@@ -93,6 +93,7 @@ The JSON structure used in this topic is the following:
 
 - `"RESPONSE"` → Used for responses or command confirmations. (`"summary"` is ignored.)
 - `"SUMMARY"` → Used for summary data. (`"stations"` is ignored.)
+- `"ALERT"` → Used for unexpected notifications. For example, if the station the operator is serving has a leak.
   
 `"stations"` → list of tuples with the form (`<station_id>`, `<location>`,`<status>`)<br>
 `"summary"` → tuple with the form (`<station_id>`, `<total_time (mins)>`,`<total_liters (L)>`)
