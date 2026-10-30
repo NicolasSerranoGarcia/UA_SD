@@ -61,7 +61,12 @@ def _db_writer_worker():
                     cursor.execute( """
                                     UPDATE stations SET previous_status = ? WHERE id = ?
                                     """, (previous_status, station_id))
-                       
+                
+                elif op == "SET_STATION_OPERATOR":
+                    
+                    station_id, operator_id = data
+                    cursor.execute("UPDATE stations SET operator_serving = ? WHERE id = ?", (operator_id, station_id))
+                
                 conn.commit()
             
             except Exception as e:
@@ -104,10 +109,19 @@ def init_database():
                        )
                        """)
         
-        # To not wipe the railway volume, this code just adds the new column if is not created
+        # To not wipe the railway volume, this code just adds the new column "previous_status" if is not created
         try:
             
             cursor.execute("ALTER TABLE stations ADD COLUMN previous_status TEXT CHECK (previous_status IN ('Available', 'Watering', 'Leak', 'Out of service', 'Disconnected'));")
+            
+        except sqlite3.OperationalError:
+            
+            pass
+        
+        # To not wipe the railway volume, this code just adds the new column "operator_serving" if is not created
+        try:
+            
+            cursor.execute("ALTER TABLE stations ADD COLUMN operator_serving INTEGER;")
             
         except sqlite3.OperationalError:
             
@@ -145,7 +159,11 @@ def set_station_status(station_id: int, status: str):
 def set_station_previous_status(station_id: int, previous_status: str):
     
     _db_queue.put(("SET_STATION_PREVIOUS_STATUS", (station_id, previous_status)))
-               
+
+def set_station_serving_operator(station_id: int, operator: int):
+    
+    _db_queue.put(("SET_STATION_OPERATOR", (station_id, operator)))
+       
 def store_operator(operator_id: int):
     
     _db_queue.put(("INSERT_OPERATOR", operator_id))
@@ -169,6 +187,76 @@ def read_station(station_id: int):
         print("DB ERROR: ", e)
         return []
         
+    finally:
+        
+        conn.close()
+
+def get_station_status(station_id: int):
+    
+    conn = _get_db_connection()
+    try:
+        
+        row = conn.execute("SELECT status FROM stations WHERE id = ?", (station_id,)).fetchone()
+        return row[0] if row else None
+    
+    except Exception as e:
+        
+        print("DB ERROR: ", e)
+        return None
+    
+    finally:
+        
+        conn.close()
+
+def get_station_previous_status(station_id: int):
+    
+    conn = _get_db_connection()
+    try:
+        
+        row = conn.execute("SELECT previous_status FROM stations WHERE id = ?", (station_id,)).fetchone()
+        return row[0] if row else None
+    
+    except Exception as e:
+        
+        print("DB ERROR: ", e)
+        return None
+    
+    finally:
+        
+        conn.close()
+
+def get_station_serving_operator(station_id: int):
+    """Function that returns the operator that is serving a certain station"""
+    
+    conn = _get_db_connection()
+    try:
+        
+        row = conn.execute("SELECT operator_serving FROM stations WHERE id = ?", (station_id,)).fetchone()
+        return row[0] if row else None
+    
+    except Exception as e:
+        
+        print("DB ERROR: ", e)
+        return None
+    
+    finally:
+        
+        conn.close()
+
+def get_operator_station(operator_id):
+    """Function that returns the station a certain operator is serving"""
+    
+    conn = _get_db_connection()
+    try:
+        
+        row = conn.execute("SELECT id FROM stations WHERE operator_serving = ?", (operator_id,)).fetchone()
+        return row[0] if row else None
+    
+    except Exception as e:
+        
+        print("DB ERROR: ", e)
+        return None
+    
     finally:
         
         conn.close()
