@@ -1,6 +1,7 @@
 import json
 import queue
 import threading
+import modules.shared.shared_state as st
 from confluent_kafka import Consumer, Producer, KafkaException, KafkaError, TopicPartition
 from confluent_kafka.admin import AdminClient
 
@@ -8,6 +9,13 @@ FORMAT = "utf-8"
 
 _producer: Producer | None = None
 _stop_event: threading.Event | None = None
+
+def _on_delivery(err, msg):
+    if err is not None:
+        st.log(f"[KAFKA ERROR] NOT delivered to {msg.topic()}: {err}")
+    else:
+        st.log(f"[KAFKA] Delivered to {msg.topic()} p{msg.partition()} offset {msg.offset()}")
+        
 
 def start_kafka(bootstrap_servers: str, stop_event: threading.Event, topic_handlers: dict):
     
@@ -20,7 +28,7 @@ def start_kafka(bootstrap_servers: str, stop_event: threading.Event, topic_handl
         kafka_config = {
             "bootstrap.servers": bootstrap_servers,
             "socket.timeout.ms": 2000,
-            "message.timeout.ms": 3000,
+            "message.timeout.ms": 15000,
         }
         
         _producer = Producer(kafka_config)
@@ -55,11 +63,17 @@ def _generic_consumer(bootstrap_servers: str, topic: str, stop_event: threading.
         }
         
         consumer = Consumer(consumer_config)
-        consumer.subscribe([topic])
+        
+        def _on_assign(c, partitions):
+            st.log(f"[KAFKA] Consumer of '{topic}' joined: partitions {[p.partition for p in partitions]}")
+        
+        consumer.subscribe([topic], on_assign=_on_assign)
         
         while not stop_event.is_set():
             
             msg = consumer.poll(timeout=1.0)
+            
+            if _producer: _producer.poll(0)
             
             if msg is None: # First we check if the message is none
                 
@@ -78,6 +92,8 @@ def _generic_consumer(bootstrap_servers: str, topic: str, stop_event: threading.
                 continue
             
             try:
+                
+                st.log(f"[KAFKA RX] {topic}: {msg.value()[:200]}")
                 
                 data = json.loads(msg.value().decode(FORMAT))
                 handleFunc(data)
@@ -113,7 +129,7 @@ def send_event(topic: str, msg: dict, key: str | int | None = None):
         msg_bytes = json.dumps(msg).encode(FORMAT)
         key_bytes = str(key).encode(FORMAT) if key is not None else None
         
-        _producer.produce(topic=topic, value=msg_bytes, key=key_bytes)
+        _producer.produce(topic=topic, value=msg_bytes, key=key_bytes, on_delivery=_on_delivery)
         _producer.poll(0)
         
     except Exception as e:
