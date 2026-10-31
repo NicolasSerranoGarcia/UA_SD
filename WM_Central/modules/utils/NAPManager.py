@@ -125,6 +125,11 @@ def process_nap_frame(client_socket: socket.socket, fields: list) -> tuple[bool,
                 
                 else:
                     
+                    # Reliability purposes. If the station was disconnected but central recieves heartbeat, passes to status "Available"
+                    if current_status == "Disconnected": 
+                        
+                        db.set_station_status(station_id, "Available")
+                    
                     if current_status == "Leak":
                         
                         previous_status = db.get_station_previous_status(station_id) or "Available"

@@ -545,6 +545,7 @@ def main():
 if __name__ == "__main__":
     
     db.init_database()
+    db.reset_stations()
     main()
     db.stop_database()
 

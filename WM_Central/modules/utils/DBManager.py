@@ -143,7 +143,33 @@ def init_database():
         writer_thread = threading.Thread(target=_db_writer_worker, daemon=True)  
         writer_thread.start()
         _writer_started = True  
+ 
+def reset_stations():
     
+    conn = _get_db_connection() 
+    conn.execute("PRAGMA journal_mode=WAL;")
+    
+    try:
+        
+        cursor = conn.cursor()
+        cursor.execute("""
+                       UPDATE stations SET status = 'Disconnected', previous_status = NULL, operator_serving = NULL
+                       """)
+   
+        conn.commit()
+        return cursor.rowcount
+    
+    except Exception as e:
+        
+        print("[DB ERROR]: ", e)
+        return 0
+    
+    finally:
+        
+        conn.close()
+        
+        
+   
 def stop_database():
     
     _db_queue.put(None)
