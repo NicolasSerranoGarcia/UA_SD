@@ -48,6 +48,7 @@ struct Service::Impl : RdKafka::DeliveryReportCb, RdKafka::EventCb {
     std::mutex brokerErrorMutex;
     std::string brokerError;
     std::optional<bool> delivered;
+    RdKafka::ErrorCode lastProduceError = RdKafka::ERR_NO_ERROR;
     std::chrono::steady_clock::time_point nextMetadata{};
     std::chrono::steady_clock::time_point nextCheckpoint{};
     std::future<MetadataResult> metadataRequest;
@@ -70,6 +71,11 @@ struct Service::Impl : RdKafka::DeliveryReportCb, RdKafka::EventCb {
 
     void dr_cb(RdKafka::Message &message) override {
         delivered = message.err() == RdKafka::ERR_NO_ERROR;
+        logging::record() << "[Engine][Kafka][DELIVERY] ws=" << engine.wsId()
+                          << " topic=" << message.topic_name() << " partition=" << message.partition()
+                          << " offset=" << message.offset() << " key=" << (message.key() ? *message.key() : "<none>")
+                          << " status=" << (*delivered ? "delivered" : "retry")
+                          << " result=" << message.errstr() << std::endl;
     }
 
     void event_cb(RdKafka::Event &event) override {
@@ -107,6 +113,7 @@ struct Service::Impl : RdKafka::DeliveryReportCb, RdKafka::EventCb {
         std::unique_ptr<RdKafka::Conf> configuration{RdKafka::Conf::create(RdKafka::Conf::CONF_GLOBAL)};
         configureLogging(*configuration);
         configure(*configuration, "bootstrap.servers", endpoint);
+        configure(*configuration, "client.id", "wm-ws-publisher-" + id);
         configure(*configuration, "enable.idempotence", "true");
         configure(*configuration, "message.timeout.ms", "3000");
         configure(*configuration, "socket.timeout.ms", "1000");
@@ -119,12 +126,17 @@ struct Service::Impl : RdKafka::DeliveryReportCb, RdKafka::EventCb {
         configureLogging(*configuration);
         configure(*configuration, "bootstrap.servers", endpoint);
         configure(*configuration, "group.id", "wm-ws-" + id);
+        configure(*configuration, "client.id", "wm-ws-commands-" + id);
         configure(*configuration, "enable.auto.commit", "false");
         configure(*configuration, "auto.offset.reset", "latest");
         configure(*configuration, "socket.timeout.ms", "1000");
         consumer.reset(RdKafka::KafkaConsumer::create(configuration.get(), error));
         if (!consumer)
             throw std::runtime_error(error);
+        logging::record() << "[Engine][Kafka][CONFIG] ws=" << id << " broker=" << endpoint
+                          << " group=wm-ws-" << id << " offset_reset=latest"
+                          << " metadata_timeout_ms=5000 metadata_mode=async pending="
+                          << station->events().size() << std::endl;
     }
 
     void refreshMetadata(const std::string &id) {
@@ -148,9 +160,22 @@ struct Service::Impl : RdKafka::DeliveryReportCb, RdKafka::EventCb {
             return;
         }
         for (const auto *topic : *result.value->topics()) {
-            if (topic->err() == RdKafka::ERR_NO_ERROR)
-                partitions[topic->topic()] = static_cast<int>(topic->partitions()->size());
+            if (topic->err() == RdKafka::ERR_NO_ERROR) {
+                const auto count = static_cast<int>(topic->partitions()->size());
+                const auto previous = partitions.find(topic->topic());
+                if (previous == partitions.end() || previous->second != count)
+                    logging::record() << "[Engine][Kafka][METADATA] ws=" << id << " topic="
+                                      << topic->topic() << " partitions=" << count << std::endl;
+                partitions[topic->topic()] = count;
+            } else {
+                logging::record() << "[Engine][Kafka][METADATA] ws=" << id << " topic="
+                                  << topic->topic() << " error=" << RdKafka::err2str(topic->err()) << std::endl;
+            }
         }
+        for (const auto *topic : {"central-ops", "telemetry", "ws-start-conf", "ws-finish-conf"})
+            if (!partitions.contains(topic))
+                logging::record() << "[Engine][Kafka][METADATA] ws=" << id << " missing topic=" << topic
+                                  << "; check that both applications use the same broker and topic names" << std::endl;
         const auto found = partitions.find("central-ops");
         if (found == partitions.end() || found->second <= 0)
             return;
@@ -162,10 +187,15 @@ struct Service::Impl : RdKafka::DeliveryReportCb, RdKafka::EventCb {
             return;
         std::unique_ptr<RdKafka::TopicPartition> assignment{
             RdKafka::TopicPartition::create("central-ops", desired, RdKafka::Topic::OFFSET_STORED)};
-        if (consumer->assign({assignment.get()}) == RdKafka::ERR_NO_ERROR) {
+        const auto assigned = consumer->assign({assignment.get()});
+        if (assigned == RdKafka::ERR_NO_ERROR) {
             commandPartition = desired;
-            logging::record() << "[Engine][Kafka] ws=" << id
-                                       << " central-ops partition=" << commandPartition << std::endl;
+            logging::record() << "[Engine][Kafka][ASSIGN] ws=" << id << " group=wm-ws-" << id
+                              << " central-ops partition=" << commandPartition << " partitions=" << found->second
+                              << " key=" << key << " rule=crc32 stored_offset_or=latest" << std::endl;
+        } else {
+            logging::record() << "[Engine][Kafka][ASSIGN] ws=" << id << " central-ops partition=" << desired
+                              << " error=" << RdKafka::err2str(assigned) << std::endl;
         }
     }
 
@@ -184,8 +214,19 @@ struct Service::Impl : RdKafka::DeliveryReportCb, RdKafka::EventCb {
         const auto error = producer->produce(event.topic, *partition, RdKafka::Producer::RK_MSG_COPY,
             const_cast<char *>(value.data()), value.size(), event.recipient.data(),
             event.recipient.size(), 0, nullptr);
-        if (error == RdKafka::ERR_NO_ERROR)
+        if (error == RdKafka::ERR_NO_ERROR) {
             inFlight = true;
+            lastProduceError = RdKafka::ERR_NO_ERROR;
+            logging::record() << "[Engine][Kafka][TX] ws=" << engine.wsId() << " topic=" << event.topic
+                              << " partition=" << *partition << " partitions=" << found->second
+                              << " key=" << event.recipient << " rule=modulo status=queued"
+                              << " pending=" << station->events().size() << " payload=" << value << std::endl;
+        } else if (error != lastProduceError) {
+            lastProduceError = error;
+            logging::record() << "[Engine][Kafka][TX] ws=" << engine.wsId() << " topic=" << event.topic
+                              << " partition=" << *partition << " key=" << event.recipient
+                              << " error=" << RdKafka::err2str(error) << "; retaining record for retry" << std::endl;
+        }
     }
 
     void run(std::stop_token stop) {
@@ -231,13 +272,27 @@ struct Service::Impl : RdKafka::DeliveryReportCb, RdKafka::EventCb {
                             if (commandPartition >= 0) {
                                 const std::unique_ptr<RdKafka::Message> message{consumer->consume(0)};
                                 if (message->err() == RdKafka::ERR_NO_ERROR) {
-                                    const auto handled = station->handle(std::string_view{
-                                        static_cast<const char *>(message->payload()), message->len()},
+                                    const std::string_view payload{
+                                        static_cast<const char *>(message->payload()), message->len()};
+                                    logging::record() << "[Engine][Kafka][RX] ws=" << id << " topic="
+                                                      << message->topic_name() << " partition=" << message->partition()
+                                                      << " offset=" << message->offset() << " key="
+                                                      << (message->key() ? *message->key() : "<none>")
+                                                      << " payload=" << payload << std::endl;
+                                    const auto handled = station->handle(payload,
                                         [this] { save(); });
                                     if (!handled)
                                         logging::record() << "[Engine][Kafka] " << handled.error() << '\n';
                                     save();
-                                    (void)consumer->commitAsync(message.get());
+                                    const auto committed = consumer->commitAsync(message.get());
+                                    if (committed != RdKafka::ERR_NO_ERROR)
+                                        logging::record() << "[Engine][Kafka][OFFSET] ws=" << id << " partition="
+                                                          << message->partition() << " offset=" << message->offset()
+                                                          << " error=" << RdKafka::err2str(committed) << std::endl;
+                                } else if (message->err() != RdKafka::ERR__TIMED_OUT &&
+                                           message->err() != RdKafka::ERR__PARTITION_EOF) {
+                                    logging::record() << "[Engine][Kafka][RX] ws=" << id << " central-ops partition="
+                                                      << commandPartition << " error=" << message->errstr() << std::endl;
                                 }
                             }
                             // Persist pending output before handing it to the broker.
@@ -273,6 +328,9 @@ bool Service::startLocal() {
         if (impl_->failed || !impl_->station || !impl_->station->startLocal([this] { impl_->save(); }))
             return false;
         impl_->save();
+        logging::record() << "[Engine][Kafka][OUTBOX] ws=" << impl_->engine.wsId()
+                          << " local irrigation started; confirmation saved for Central; pending="
+                          << impl_->station->events().size() << std::endl;
         return true;
     } catch (...) {
         impl_->engine.injectFault();
