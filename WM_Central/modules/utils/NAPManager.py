@@ -1,10 +1,10 @@
 import socket
-import modules.DBManager as db
+import modules.utils.DBManager as db
+import modules.shared.shared_state as st
+from modules.kafka_clients import send_event
 
 SEPARATOR = "#"
 FORMAT = 'utf-8'
-
-from modules.kafka_clients import send_event
 
 def calculate_lrc(msg: str) -> str:
     """Funcion that calculates the LRC of a message"""
@@ -71,6 +71,7 @@ def process_nap_frame(client_socket: socket.socket, fields: list) -> tuple[bool,
                 db.store_station(station_id=station_id, station_location=station_location)
                 send_nap_msg(client_socket, f"NAP#1.0#{ack_code}#3#{station_id}")
                 print(f"[NAP] Station {station_id} ({station_location}) correctly enrolled.")
+                st.log(f"WS-{station_id} ({station_location}) correctly enrolled") 
                 
             else:
                 
@@ -88,6 +89,7 @@ def process_nap_frame(client_socket: socket.socket, fields: list) -> tuple[bool,
                 db.set_station_status(station_id, status="Available")
                 send_nap_msg(client_socket, f"NAP#1.0#{ack_code}#3#{station_id}")
                 print(f"[NAP] Station {station_id} available and ready for irrigation.")
+                st.log(f"WS-{station_id} activated and available") 
                 
             else:
                 
@@ -111,7 +113,9 @@ def process_nap_frame(client_socket: socket.socket, fields: list) -> tuple[bool,
                         
                         db.set_station_status(station_id, "Leak")
                         db.set_station_previous_status(station_id, current_status or "Available")
+                        
                         print(f"[NAP] Leak detected in station {station_id}.")
+                        st.log(f"WS-{station_id} leak detected")
                         
                         alert_operator_serving(station_id, "LEAK")
 
@@ -131,7 +135,8 @@ def process_nap_frame(client_socket: socket.socket, fields: list) -> tuple[bool,
                             previous_status = "Available"
                         
                         db.set_station_status(station_id, previous_status)
-                        print(f"[NAP] Station {station_id} recovered from Leak. Restored to status '{previous_status}'.")
+                        print(f"[NAP] Station {station_id} recovered from Leak. Restored to status '{previous_status}'")
+                        st.log(f"WS-{station_id} recovered from leak. Restored to status '{previous_status}'")
                     
                     send_nap_msg(client_socket, f"NAP#1.0#{ack_code}#3#{station_id}")
                     return True, station_id

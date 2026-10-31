@@ -3,6 +3,7 @@ import sqlite3
 import threading
 import queue
 import time
+import argparse
 
 DB_DIR = os.getenv("DB_DIR","./data")
 DB_PATH = os.path.join(DB_DIR, "stations.db") 
@@ -36,10 +37,10 @@ def _db_writer_worker():
                 cursor = conn.cursor()
                 if op == "INSERT_STATION":
                     
-                    station_id, station_location, station_status = data
+                    station_id, station_location, station_status, previous_status, operator_serving = data
                     cursor.execute( """
-                                    INSERT INTO stations (id, location, status) VALUES (?, ?, ?)
-                                    """, (station_id, station_location, station_status))    
+                                    INSERT INTO stations (id, location, status, previous_status, operator_serving) VALUES (?, ?, ?, ?, ?)
+                                    """, (station_id, station_location, station_status, previous_status, operator_serving))    
                     
                 elif op == "INSERT_OPERATOR":
                     
@@ -71,7 +72,7 @@ def _db_writer_worker():
             
             except Exception as e:
                 
-                print("DB ERROR: ", e)
+                print("[DB ERROR]: ", e)
                 
             finally:
                 
@@ -79,7 +80,7 @@ def _db_writer_worker():
     
     except Exception as e:
     
-        print("DB ERROR: ", e)
+        print("[DB ERROR]: ", e)
     
     finally:
         
@@ -131,7 +132,7 @@ def init_database():
         
     except Exception as e:
         
-        print("DB ERROR: ", e)
+        print("[DB ERROR]: ", e)
         
     finally:
         
@@ -148,9 +149,13 @@ def stop_database():
     _db_queue.put(None)
     _db_queue.join()
 
-def store_station(station_id: int, station_location: str, station_status: str = "Disconnected"):
+def store_station(station_id: int,
+                station_location: str, 
+                station_status: str = "Disconnected", 
+                previous_status: str | None = None,
+                operator_serving: int | None = None):
     
-    _db_queue.put(("INSERT_STATION", (station_id, station_location, station_status)))
+    _db_queue.put(("INSERT_STATION", (station_id, station_location, station_status, previous_status, operator_serving)))
         
 def set_station_status(station_id: int, status: str):
     
@@ -184,7 +189,7 @@ def read_station(station_id: int):
         
     except Exception as e:
         
-        print("DB ERROR: ", e)
+        print("[DB ERROR]: ", e)
         return []
         
     finally:
@@ -194,6 +199,8 @@ def read_station(station_id: int):
 def get_station_status(station_id: int):
     
     conn = _get_db_connection()
+    conn.execute("PRAGMA journal_mode=WAL;")
+    
     try:
         
         row = conn.execute("SELECT status FROM stations WHERE id = ?", (station_id,)).fetchone()
@@ -201,7 +208,7 @@ def get_station_status(station_id: int):
     
     except Exception as e:
         
-        print("DB ERROR: ", e)
+        print("[DB ERROR]: ", e)
         return None
     
     finally:
@@ -211,6 +218,8 @@ def get_station_status(station_id: int):
 def get_station_previous_status(station_id: int):
     
     conn = _get_db_connection()
+    conn.execute("PRAGMA journal_mode=WAL;")
+    
     try:
         
         row = conn.execute("SELECT previous_status FROM stations WHERE id = ?", (station_id,)).fetchone()
@@ -218,7 +227,7 @@ def get_station_previous_status(station_id: int):
     
     except Exception as e:
         
-        print("DB ERROR: ", e)
+        print("[DB ERROR]: ", e)
         return None
     
     finally:
@@ -229,6 +238,8 @@ def get_station_serving_operator(station_id: int):
     """Function that returns the operator that is serving a certain station"""
     
     conn = _get_db_connection()
+    conn.execute("PRAGMA journal_mode=WAL;")
+    
     try:
         
         row = conn.execute("SELECT operator_serving FROM stations WHERE id = ?", (station_id,)).fetchone()
@@ -236,17 +247,19 @@ def get_station_serving_operator(station_id: int):
     
     except Exception as e:
         
-        print("DB ERROR: ", e)
+        print("[DB ERROR]: ", e)
         return None
     
     finally:
         
         conn.close()
 
-def get_operator_station(operator_id):
+def get_operator_station_served(operator_id):
     """Function that returns the station a certain operator is serving"""
     
     conn = _get_db_connection()
+    conn.execute("PRAGMA journal_mode=WAL;")
+    
     try:
         
         row = conn.execute("SELECT id FROM stations WHERE operator_serving = ?", (operator_id,)).fetchone()
@@ -254,7 +267,7 @@ def get_operator_station(operator_id):
     
     except Exception as e:
         
-        print("DB ERROR: ", e)
+        print("[DB ERROR]: ", e)
         return None
     
     finally:
@@ -277,13 +290,36 @@ def read_all_stations():
         
     except Exception as e:
         
-        print("DB ERROR: ", e)
+        print("[DB ERROR]: ", e)
         return []
         
     finally:
         
         conn.close()
-              
+
+def read_all_stations_detailed():
+    
+    conn = _get_db_connection()
+    conn.execute("PRAGMA journal_mode=WAL;")
+    
+    try:
+        
+        cursor = conn.cursor()
+        cursor.execute("""
+                       SELECT id, location, status, operator_serving FROM stations
+                       """)
+        
+        return cursor.fetchall()
+    
+    except Exception as e:
+        
+        print("[DB ERROR]: ", e)
+        return []
+    
+    finally:
+        
+        conn.close()
+             
 def check_station(station_id: int) -> bool:
     
     conn = _get_db_connection()
@@ -300,7 +336,7 @@ def check_station(station_id: int) -> bool:
         
     except Exception as e:
         
-        print("DB ERROR: ", e)
+        print("[DB ERROR]: ", e)
         return False
         
     finally:
@@ -323,7 +359,7 @@ def check_operator(operator_id: int) -> bool:
         
     except Exception as e:
         
-        print("DB ERROR: ", e)
+        print("[DB ERROR]: ", e)
         return False
         
     finally:
@@ -355,11 +391,17 @@ def _erase_db():
 
 if __name__ == "__main__":
     
+    argparser = argparse.ArgumentParser(description="Parser for DB Manager")
+    argparser.add_argument("-d", "--delete", action="store_true", help="If activated, it deletes de DB")
+    
+    args = argparser.parse_args()
+    
     init_database()
-    store_station(10, "Alicante")
-    store_station(11, "Barcelona", "Leak")
-    set_station_status(11, "Available")
-    set_station_previous_status(10, "Out of service")
+    
+    if args.delete:
+        _erase_db()
+        exit()
+    
     store_operator(13)
     
     _db_queue.join()
@@ -367,7 +409,32 @@ if __name__ == "__main__":
     print("Station with id 10: ", read_station(10)) 
     print("Stored stations: ", read_all_stations())
     print(check_operator(13), check_operator(14))
-    _erase_db()
+    
+    
+    TEST_STATIONS = [
+    (4,  "River Park",         "Available"),
+    (7,  "River Park",         "Watering"),
+    (2,  "Riverside Gardens",  "Available"),
+    (11, "Riverside Gardens",  "Leak"),
+    (9,  "Riverside Gardens",  "Disconnected"),
+    (13, "Central Park",       "Watering"),
+    (5,  "Central Park",       "Leak"),
+    (8,  "Central Park",       "Out of service"),
+    (15, "North Roundabout",   "Available"),
+    (16, "North Roundabout",   "Disconnected"),
+    (20, "Parque de la Ereta", "Available"),
+    (21, "Parque de la Ereta", "Disconnected"),
+    (22, "Playa del Postiguet","Out of service"),
+    (23, "Parque El Palmeral", "Available"),
+    (24, "Parque Lo Morant",   "Disconnected"),
+    ]
+    
+    for i, station in enumerate(TEST_STATIONS):
+        
+        station_id, location, status = station
+        
+        store_station(station_id, location, status, operator_serving=i)
+    _db_queue.join()          # espera a que el worker escriba todo
     
     
     

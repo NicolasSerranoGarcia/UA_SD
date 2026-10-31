@@ -3,10 +3,13 @@ import os
 import argparse
 import socket
 import threading
-import modules.DBManager as db
-import modules.NAPManager as nap    
-from modules.kafka_clients import *
-from confluent_kafka import Consumer, Producer
+import modules.utils.DBManager as db
+import modules.utils.NAPManager as nap 
+import modules.shared.shared_state as st   
+import modules.kafka_clients as kcli
+from modules.shared.shared_state import operation_fo_dict as _operation_fo_dict
+from modules.shared.shared_state import operation_central_dict as _operation_central_dict
+from modules.web.web_api import start_web
 
 FORMAT = 'utf-8'
 BLOCK_TAM = 1024
@@ -19,9 +22,6 @@ COMMAND_STATUS_TRADUCTION = {
     "ACTIVATE": "Available",
     "STOP": "Available",
 }
-
-_operation_fo_dict: dict = {} # Stores for each operation code, the operator that sended the command and the command it sended (if exists)
-_operation_central_dict: dict = {} # Stores the operation codes that have not yet received a response from the station along with the command type
 
 def manage_WS(client_socket: socket.socket, addr):
     """Function that manages the connection through sockets with an station"""
@@ -46,8 +46,8 @@ def manage_WS(client_socket: socket.socket, addr):
                         
                         print(f"[NAP ERROR] No message recieved froms station WS-{current_station_id}. Connection lost.")
                         db.set_station_status(current_station_id, status="Disconnected")
-                        
                         nap.alert_operator_serving(current_station_id, "DISCONNECTED")
+                        st.log(f"WS-{current_station_id} disconnected. No more messages")
                         
                     break
                 
@@ -83,8 +83,8 @@ def manage_WS(client_socket: socket.socket, addr):
                     
                     print(f"[NAP TIMEOUT] Socket timeout expired. Connection lost with station WS-{current_station_id}")
                     db.set_station_status(current_station_id, status="Disconnected")
-                    
                     nap.alert_operator_serving(current_station_id, "DISCONNECTED")
+                    st.log(f"WS-{current_station_id} disconnected. Socket time out expired")
                     
                 break
         
@@ -104,7 +104,8 @@ def telemetry_handler(data: dict):
     status = db.get_station_status(station_id)
     
     if status == "Watering":
-    
+        
+        st.update_telemetry(station_id, flux)
         print(f"[IRRIGATING] Station {station_id:<6} Flux: {flux}")
 
 def fo_req_handler(data:dict):
@@ -119,6 +120,7 @@ def fo_req_handler(data:dict):
         
         db.store_operator(operator_id)
     
+    # If the station does not exist, we notify de FO
     if command != "GET-STATIONS" and not db.check_station(station_id):
         
         msg = {
@@ -129,7 +131,7 @@ def fo_req_handler(data:dict):
             "reason": f"Sation {station_id} does not exist in the DB"
         }
         
-        send_event(topic="central-notis", msg=msg, key=operator_id)
+        kcli.send_event(topic="central-notis", msg=msg, key=operator_id)
         
         return
     
@@ -137,7 +139,7 @@ def fo_req_handler(data:dict):
         
         case "IRRIGATION":
             
-            station_served = db.get_operator_station(operator_id)
+            station_served = db.get_operator_station_served(operator_id)
             
             # This is done so an operator cannot serve two stations at the same time
             if station_served is not None and station_served != station_id:
@@ -153,7 +155,7 @@ def fo_req_handler(data:dict):
                     "reason": f"You cannot serve another station, you are currently serving station WS-{station_served}",
                 }
                 
-                send_event(topic=target_topic, msg=msg, key=key)
+                kcli.send_event(topic=target_topic, msg=msg, key=key)
                 return
             
             # If the operator is not serving an station or is the same station is serving
@@ -173,7 +175,8 @@ def fo_req_handler(data:dict):
                     "duration": duration,
                 }
                 
-                _operation_fo_dict[operation_code] = (operator_id, command)              
+                _operation_fo_dict[operation_code] = (operator_id, command)    
+                st.log(f"FO-{operator_id} requested {command} on WS-{station_id}")          
             
             elif station_status in STATION_POSSIBLE_STATUS:
                 
@@ -193,9 +196,10 @@ def fo_req_handler(data:dict):
             else:
                 
                 print(f"[STATUS ERROR] Unexpected status of station {station_id} in DB: {station_status}")
+                st.log(f"[STATUS ERROR] Unexpected status of station WS-{station_id} in DB: {station_status}")
                 return
             
-            send_event(topic=target_topic, msg=msg, key=key)
+            kcli.send_event(topic=target_topic, msg=msg, key=key)
             
         case "BLOCK":
             
@@ -214,6 +218,7 @@ def fo_req_handler(data:dict):
                 }
                 
                 _operation_fo_dict[operation_code] = (operator_id, command)
+                st.log(f"FO-{operator_id} requested {command} on WS-{station_id}")   
             
             
             elif station_status in STATION_POSSIBLE_STATUS:
@@ -236,7 +241,7 @@ def fo_req_handler(data:dict):
                 print(f"[STATUS ERROR] Unexpected status of station {station_id} in DB: {station_status}")
                 return
             
-            send_event(topic=target_topic, msg=msg, key=key)
+            kcli.send_event(topic=target_topic, msg=msg, key=key)
             
         case "ACTIVATE":
             
@@ -255,6 +260,7 @@ def fo_req_handler(data:dict):
                 }
                 
                 _operation_fo_dict[operation_code] = (operator_id, command)
+                st.log(f"FO-{operator_id} requested {command} on WS-{station_id}")   
             
             
             elif station_status in STATION_POSSIBLE_STATUS:
@@ -276,9 +282,10 @@ def fo_req_handler(data:dict):
             else:
                 
                 print(f"[STATUS ERROR] Unexpected status of station {station_id} in DB: {station_status}")
+                st.log(f"[STATUS ERROR] Unexpected status of station WS-{station_id} in DB: {station_status}")
                 return
             
-            send_event(topic=target_topic, msg=msg, key=key)
+            kcli.send_event(topic=target_topic, msg=msg, key=key)
         
         case "STOP":
           
@@ -297,6 +304,7 @@ def fo_req_handler(data:dict):
                 }
             
                 _operation_fo_dict[operation_code] = (operator_id, command)
+                st.log(f"FO-{operator_id} requested {command} on WS-{station_id}")   
             
             elif station_status in STATION_POSSIBLE_STATUS:
                 
@@ -315,9 +323,10 @@ def fo_req_handler(data:dict):
             else:
                 
                 print(f"[STATUS ERROR] Unexpected status of station {station_id} in DB: {station_status}")
+                st.log(f"[STATUS ERROR] Unexpected status of station WS-{station_id} in DB: {station_status}")
                 return
             
-            send_event(topic=target_topic, msg=msg, key=key)  
+            kcli.send_event(topic=target_topic, msg=msg, key=key)  
         
         case "GET-STATIONS":
 
@@ -333,11 +342,12 @@ def fo_req_handler(data:dict):
                 "stations":stations,
             }
             
-            send_event(topic=target_topic, msg=msg, key=key)
+            kcli.send_event(topic=target_topic, msg=msg, key=key)
 
         case _:
             
             print("[FO ERROR] Invalid operation received")
+            st.log(f"[FO ERROR] Invalid operation received from operator FO-{operator_id}")
     
 def ws_finish_conf_handler(data: dict):
     
@@ -358,6 +368,7 @@ def ws_finish_conf_handler(data: dict):
         db.set_station_status(station_id, "Available")
         print(f"[IRRIGATION FINISHED] Station WS-{station_id} finished irrigating")
         print(f"Summary:\n# Total liters irrigated: {total_liters} L\n# Total time irrigated: {total_time} min\n# Average flux: {total_liters/total_time} L/min")
+        st.log(f"[IRRIGATION FINISHED] WS-{station_id} finished: {total_liters} L in {total_time} min. Average flux: {total_liters/total_time} L/min")
         
         operator_id = data.get("operator_id") or db.get_station_serving_operator(station_id)
         db.set_station_serving_operator(station_id, None)
@@ -374,7 +385,7 @@ def ws_finish_conf_handler(data: dict):
                 "summary":summary,
             }
             
-            send_event(topic=target_topic, msg=msg, key=operator_id)
+            kcli.send_event(topic=target_topic, msg=msg, key=operator_id)
         
 def ws_start_conf_handler(data: dict):
     
@@ -389,7 +400,9 @@ def ws_start_conf_handler(data: dict):
         if status == "OK":
             
             db.set_station_status(station_id, "Watering")
+            st.reset_telemetry(station_id)
             print(f"[IRRIGATION STARTED] Station WS-{station_id} started irrigating")
+            st.log(f"[IRRIGATION STARTED] ]WS-{station_id} started irrigating (manual)")
     
         
     else: # Confirmation of an operation sent by the central or by a field operator
@@ -404,9 +417,17 @@ def ws_start_conf_handler(data: dict):
                 db_status = COMMAND_STATUS_TRADUCTION.get(command)
                 db.set_station_status(station_id, db_status)
                 
+                if command == "IRRIGATION":
+                    st.reset_telemetry(station_id)
+                
+                if command in ("BLOCK", "STOP"):
+                    nap.alert_operator_serving(station_id, command)
+                
             elif status == "KO":
                 
                 print(f"[COMMAND FAILURE] Error in station WS-{station_id} trying command {command}: Reason: {data.get("reason")}")
+                
+            st.log(f"[WS RESPONSE] Central -> WS-{station_id}. Command: {command}. Response: {status}. " + (f"Reason: {data.get("reason")}" if status == "KO" else ""))
              
         elif operation_code in _operation_fo_dict: # The operation was sent by a field operator
             
@@ -421,6 +442,7 @@ def ws_start_conf_handler(data: dict):
                 if command == "IRRIGATION":
                     
                     db.set_station_serving_operator(station_id, operator_id)
+                    st.reset_telemetry(station_id)
                     
                 elif command in ("STOP", "BLOCK"):
                     
@@ -438,7 +460,8 @@ def ws_start_conf_handler(data: dict):
                 "reason": data.get("reason"),
             }
         
-            send_event(topic="central-notis", msg=msg, key=operator_id)
+            kcli.send_event(topic="central-notis", msg=msg, key=operator_id)
+            st.log(f"WS-{station_id} {command} by FO-{operator_id}: {status} ." + (f"Reason: {data.get("reason")}" if status == "KO" else ""))
  
         else:
             
@@ -449,7 +472,7 @@ def main():
     argparser = argparse.ArgumentParser(description="Central for Water Management Network")
     
     argparser.add_argument("--server-ip", type=str, default=os.getenv("SERVER_IP", "0.0.0.0"), help="Listening ip of the socket server")
-    argparser.add_argument("--port", type=int, default=int(os.getenv("PORT", 8080)), help="Listening port of the socket server")
+    argparser.add_argument("--port", type=int, default=int(os.getenv("WS_PORT", 8080)), help="Listening port of the socket server")
     argparser.add_argument("--kafka-ip", type=str, default=os.getenv("KAFKA_IP", "iriguchi.proxy.rlwy.net"), help="IP of the kafka bootstrap server")
     argparser.add_argument("--kafka-port", type=int, default=int(os.getenv("KAFKA_PORT", 37040)),help="Port of the kafka bootstrap server")
     
@@ -480,12 +503,14 @@ def main():
     
     try:
         
-        start_kafka(bootstrap_servers, stop_event, topic_handlers)
+        kcli.start_kafka(bootstrap_servers, stop_event, topic_handlers)
     
     except Exception as e:
         
         print(f"[KAFKA ERROR] {e}")
         return 
+    
+    start_web(int(os.getenv("WEB_PORT", 8000)))
     
     # Sockets management
     try:
@@ -513,7 +538,7 @@ def main():
         
     finally:
         
-        stop_kafka()
+        kcli.stop_kafka()
         validation_server.close()
 
 
