@@ -23,12 +23,20 @@ COMMAND_STATUS_TRADUCTION = {
     "STOP": "Available",
 }
 
+def _station_lost(station_id: int, reason: str):
+    
+    print(f"[NAP] Connection lost with station WS-{station_id}: {reason}")
+    db.set_station_status(station_id, "Disconnected")
+    nap.alert_operator_serving(station_id, "DISCONNECTED")
+    st.log(f"[CONNECTION LOST] WS-{station_id} disconnected: {reason}")
+
 def manage_WS(client_socket: socket.socket, addr):
     """Function that manages the connection through sockets with an station"""
     
     buffer = ""
     current_station_id = None
     keep_connection = False
+    lost_reason = None
     
     client_socket.settimeout(3.0)
     
@@ -44,10 +52,7 @@ def manage_WS(client_socket: socket.socket, addr):
                     
                     if current_station_id:
                         
-                        print(f"[NAP ERROR] No message recieved froms station WS-{current_station_id}. Connection lost.")
-                        db.set_station_status(current_station_id, status="Disconnected")
-                        nap.alert_operator_serving(current_station_id, "DISCONNECTED")
-                        st.log(f"WS-{current_station_id} disconnected. No more messages")
+                        lost_reason = "connection closed"
                         
                     break
                 
@@ -79,22 +84,21 @@ def manage_WS(client_socket: socket.socket, addr):
                 
             except socket.timeout:
                 
-                if keep_connection and current_station_id is not None:
-                    
-                    print(f"[NAP TIMEOUT] Socket timeout expired. Connection lost with station WS-{current_station_id}")
-                    db.set_station_status(current_station_id, status="Disconnected")
-                    nap.alert_operator_serving(current_station_id, "DISCONNECTED")
-                    st.log(f"WS-{current_station_id} disconnected. Socket time out expired")
+                lost_reason = "hearbeat timeout"
                     
                 break
         
     except Exception as e:
         
         print(f"[Socket Thread Error] {addr}: {e}")
+        lost_reason = f"Socket error {e}"
         
     finally:
-        
+           
         client_socket.close()
+        if lost_reason is not None and keep_connection and current_station_id is not None:
+            
+            _station_lost(current_station_id, lost_reason)
 
 def telemetry_handler(data: dict):
     
@@ -359,15 +363,20 @@ def ws_finish_conf_handler(data: dict):
     if total_time == 0 or total_time is None:
         
         print(f"[IRRIGATING ERROR] Total watering time cannot be 0. Station WS-{station_id}")
-        db.set_station_status(station_id, "Available")
+        
+        if db.get_station_status(station_id) == "Watering":
+        
+            db.set_station_status(station_id, "Available")
+            
         db.set_station_serving_operator(station_id, None)
         return
     
     if status == "FINISHED":
         
-        db.set_station_status(station_id, "Available")
-        print(f"[IRRIGATION FINISHED] Station WS-{station_id} finished irrigating")
-        print(f"Summary:\n# Total liters irrigated: {total_liters} L\n# Total time irrigated: {total_time} min\n# Average flux: {total_liters/total_time} L/min")
+        if db.get_station_status(station_id) == "Watering":
+        
+            db.set_station_status(station_id, "Available")
+            
         st.log(f"[IRRIGATION FINISHED] WS-{station_id} finished: {total_liters} L in {total_time} min. Average flux: {total_liters/total_time} L/min")
         
         operator_id = data.get("operator_id") or db.get_station_serving_operator(station_id)
