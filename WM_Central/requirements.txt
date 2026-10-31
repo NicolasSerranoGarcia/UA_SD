@@ -1,2 +1,3 @@
 # SQLite is provided by the Python image.
 confluent-kafka
+flask
