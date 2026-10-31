@@ -29,7 +29,7 @@ def send_nap_msg(client_socket:socket.socket, msg: str):
     
     client_socket.sendall(frame.encode(FORMAT))
 
-def alert_operator_serving(station_id: int, reason: str, message: str):
+def alert_operator_serving(station_id: int, reason: str, message: str = None):
     
     operator = db.get_station_serving_operator(station_id)
     
