@@ -212,7 +212,7 @@ docker compose -f WM_WS/compose.yaml -p ws-1 run --build --remove-orphans --no-d
 In **terminal 2**, build and launch Monitor:
 
 ```sh
-docker compose -f WM_WS/compose.yaml -p ws-1 run --build --remove-orphans --no-deps --name wm-monitor monitor
+docker compose -f WM_WS/compose.yaml -p ws-1 run --build --remove-orphans --no-deps --use-aliases --name wm-monitor monitor
 ```
 
 Use the same project name (`ws-1`) in both terminals so they join the same network.
