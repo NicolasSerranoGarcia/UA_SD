@@ -159,6 +159,7 @@ def fo_req_handler(data:dict):
                     "reason": f"You cannot serve another station, you are currently serving station WS-{station_served}",
                 }
                 
+                st.log(f"FO-{operator_id} {command} on WS-{station_id} DENIED: operator is already serving an station")
                 kcli.send_event(topic=target_topic, msg=msg, key=key)
                 return
             
@@ -179,6 +180,11 @@ def fo_req_handler(data:dict):
                     "duration": duration,
                 }
                 
+                # Central notifies the FO about the process
+                kcli.send_event(topic="central-notis", key=operator_id, msg={
+                    "operator_id": operator_id, "type": "INFO", "operation_code": operation_code,
+                    "message": f"Resquest of command {command} for WS-{station_id} sent correctly, waiting for response"})
+                
                 _operation_fo_dict[operation_code] = (operator_id, command)    
                 st.log(f"FO-{operator_id} requested {command} on WS-{station_id}")          
             
@@ -196,7 +202,9 @@ def fo_req_handler(data:dict):
                     "status": "KO",
                     "reason": reason,
                 }
-             
+
+                st.log(f"FO-{operator_id} {command} on WS-{station_id} DENIED: {reason}")
+                
             else:
                 
                 print(f"[STATUS ERROR] Unexpected status of station {station_id} in DB: {station_status}")
@@ -221,6 +229,11 @@ def fo_req_handler(data:dict):
                     "operation_code": operation_code,
                 }
                 
+                # Central notifies the FO about the process
+                kcli.send_event(topic="central-notis", key=operator_id, msg={
+                    "operator_id": operator_id, "type": "INFO", "operation_code": operation_code,
+                    "message": f"Resquest of command {command} for WS-{station_id} sent correctly, waiting for response"})
+                
                 _operation_fo_dict[operation_code] = (operator_id, command)
                 st.log(f"FO-{operator_id} requested {command} on WS-{station_id}")   
             
@@ -239,6 +252,8 @@ def fo_req_handler(data:dict):
                     "status": "KO",
                     "reason": reason,
                 }
+                
+                st.log(f"FO-{operator_id} {command} on WS-{station_id} DENIED: {reason}")
              
             else:
                 
@@ -263,6 +278,11 @@ def fo_req_handler(data:dict):
                     "operation_code": operation_code,
                 }
                 
+                # Central notifies the FO about the process
+                kcli.send_event(topic="central-notis", key=operator_id, msg={
+                    "operator_id": operator_id, "type": "INFO", "operation_code": operation_code,
+                    "message": f"Resquest of command {command} for WS-{station_id} sent correctly, waiting for response"})
+                
                 _operation_fo_dict[operation_code] = (operator_id, command)
                 st.log(f"FO-{operator_id} requested {command} on WS-{station_id}")   
             
@@ -282,6 +302,8 @@ def fo_req_handler(data:dict):
                     "status": "KO",
                     "reason": reason,
                 }
+             
+                st.log(f"FO-{operator_id} {command} on WS-{station_id} DENIED: {reason}")
              
             else:
                 
@@ -307,6 +329,11 @@ def fo_req_handler(data:dict):
                     "operation_code": operation_code,
                 }
             
+                # Central notifies the FO about the process
+                kcli.send_event(topic="central-notis", key=operator_id, msg={
+                    "operator_id": operator_id, "type": "INFO", "operation_code": operation_code,
+                    "message": f"Resquest of command {command} for WS-{station_id} sent correctly, waiting for response"})
+            
                 _operation_fo_dict[operation_code] = (operator_id, command)
                 st.log(f"FO-{operator_id} requested {command} on WS-{station_id}")   
             
@@ -323,6 +350,8 @@ def fo_req_handler(data:dict):
                     "status": "KO",
                     "reason": reason,
                 }
+                
+                st.log(f"FO-{operator_id} {command} on WS-{station_id} DENIED: {reason}")
              
             else:
                 
