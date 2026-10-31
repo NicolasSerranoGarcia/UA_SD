@@ -16,12 +16,13 @@ This protocol is used to authenticate the watering stations with central. The sp
 ## Kafka
 This section explains the structure and distribution of the topics created in Kafka along with the structure of the respective JSON messages used in each topic to transfer data.
 
-<img width="968" height="1337" alt="image" src="https://github.com/user-attachments/assets/a2bd0de2-5221-404b-885e-39c6e64f1935" />
+<img width="968" height="1393" alt="image" src="https://github.com/user-attachments/assets/c24fe36d-59be-4d74-a03a-85c1377df250" />
+
 
 
 
 ### Telemetry
-This topic is used for all the data that the engine sends to the central regarding to the irrigation measurements (flow, accum volume...). It operates via key-based hash addressing.
+This topic is used for all the data that the engine sends to the central regarding to the irrigation measurements (flow, accum volume...). It operates using key-based hashing for field operators. Given our assumption of 1,500 field operators, each partition handles messages for 500 of them (if an irrigation request originates from one of these operators, the message is routed to the corresponding partition; otherwise, it is assigned to any partition). The central system reads from all. partitions..
 | `Producer` | `Consumers` |
 |---|---|
 | Watering station | Central, Field Operators |
@@ -69,7 +70,7 @@ The JSON structure used in this topic is the following:
 <br>
 
 ### Central-notis
-This topic is used by the central to send notifications to the field operators, such as operation confirmations or station status updates
+This topic is used by the central to send notifications to the field operators, such as operation confirmations or station status updates. It operates using key-based hashing for the field operators. Given our assumption of 1,500 field operators, each partition handles messages for 500 of them.
 | `Producer` | `Consumer` |
 |---|---|
 | Central | Field Operator |
@@ -127,7 +128,7 @@ The JSON structure used in this topic is the following:
 <br>
 
 ### Central-ops
-This topic is used by the central unit to send operational commands, such as locking a station or starting irrigation for a station, provided that the station is available. This commands can be sent the central unit or by a field operator via central.
+This topic is used by the central unit to send operational commands, such as locking a station or starting irrigation for a station, provided that the station is available. This commands can be sent by the central unit or by a field operator via central. It operates using key-based hashing. Given our assumption of 2000 stations, each partition handles messages for 500 of them.
 | `Producer` | `Consumer` |
 |---|---|
 | Central | Watering Station |
