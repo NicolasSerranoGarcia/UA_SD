@@ -261,10 +261,10 @@ a fixed `ENGINE_IP`, recreate Monitor with the updated IP if that address change
 Menus and serious errors appear in each application's terminal. Routine activity
 is written to files in the mounted volumes:
 
-| Data | Container path |
-| ---- | -------------- |
-| Engine log | `/var/log/wm-ws/wm-ws-engine.log` |
-| Monitor log | `/var/log/wm-ws/wm-ws-monitor.log` |
+| Data                 | Container path                              |
+| -------------------- | ------------------------------------------- |
+| Engine log           | `/var/log/wm-ws/wm-ws-engine.log`         |
+| Monitor log          | `/var/log/wm-ws/wm-ws-monitor.log`        |
 | Engine recovery data | `/var/lib/wm-ws/state.jsonl.0` and `.1` |
 
 From another terminal, follow either activity log while its container is running:
@@ -311,8 +311,7 @@ To test Engine loss, type `quit` in its terminal. Let Monitor detect the lost
 connection and report it to Central, then run `docker start -ai wm-engine` in the
 Engine terminal. Monitor should reconnect automatically.
 
-A log entry such as `status acknowledged: state=fault reason=connect: ...
-Connection refused` means Central accepted Monitor's report that Engine could
+A log entry such as `status acknowledged: state=fault reason=connect: ... Connection refused` means Central accepted Monitor's report that Engine could
 not be reached. The diagnostic describes the Engine connection; the NAP report
 carries `KO`. Failures to report to Central are logged as `status send failed`
 or `status acknowledgement failed`.
@@ -342,21 +341,21 @@ Native example with every operational parameter (run from the repository root):
 
 ### Monitor: WM_WS_M
 
-| Parameter                       | CLI default               | Purpose                                                                    |
-| ------------------------------- | ------------------------- | -------------------------------------------------------------------------- |
-| `--help`                      | â€”                    | Print available options and exit.                                          |
-| `--ws-id ID`                  | Required                  | Station ID: 1â€“64 letters, digits, hyphens, or underscores.            |
-| `--engine-ip IPV4` | Alternative | Fixed Engine IPv4 address; supply this or `--engine-hostname`. |
-| `--engine-hostname HOST` | Alternative | Resolve Engine again on reconnect; mutually exclusive with `--engine-ip`. |
-| `--engine-port PORT`          | `8080`                  | Engine HCP listening port.                                                 |
-| `--hcp-timeout-ms MS`         | `2000`                  | HCP connect/send/response deadline.                                        |
-| `--hcp-retry-ms MS`           | `1000`                  | Delay between engine connection attempts.                                  |
-| `--nap-interval-ms MS`        | `1000`                  | Interval for all health reports (OK/KO) and failed-exchange retries.  |
-| `--nap-timeout-ms MS`         | `2000`                  | NAP connect/send/response deadline.                                        |
-| `--central-hostname HOST`     | Required                  | Nonempty Central hostname; resolved to IPv4.                               |
-| `--central-port PORT`         | Required                  | Central NAP TCP port.                                                      |
-| `--monitor-location LOCATION` | `spain`                 | Registration location; nonempty and must not contain `#`.                |
-| `--log-file PATH`             | `log/wm-ws-monitor.log` | Append activity logs here; create parent directories as needed.            |
+| Parameter                       | CLI default               | Purpose                                                                     |
+| ------------------------------- | ------------------------- | --------------------------------------------------------------------------- |
+| `--help`                      | â€”                    | Print available options and exit.                                           |
+| `--ws-id ID`                  | Required                  | Station ID: 1â€“64 letters, digits, hyphens, or underscores.             |
+| `--engine-ip IPV4`            | Alternative               | Fixed Engine IPv4 address; supply this or `--engine-hostname`.            |
+| `--engine-hostname HOST`      | Alternative               | Resolve Engine again on reconnect; mutually exclusive with `--engine-ip`. |
+| `--engine-port PORT`          | `8080`                  | Engine HCP listening port.                                                  |
+| `--hcp-timeout-ms MS`         | `2000`                  | HCP connect/send/response deadline.                                         |
+| `--hcp-retry-ms MS`           | `1000`                  | Delay between engine connection attempts.                                   |
+| `--nap-interval-ms MS`        | `1000`                  | Interval for all health reports (OK/KO) and failed-exchange retries.        |
+| `--nap-timeout-ms MS`         | `2000`                  | NAP connect/send/response deadline.                                         |
+| `--central-hostname HOST`     | Required                  | Nonempty Central hostname; resolved to IPv4.                                |
+| `--central-port PORT`         | Required                  | Central NAP TCP port.                                                       |
+| `--monitor-location LOCATION` | `spain`                 | Registration location; nonempty and must not contain `#`.                 |
+| `--log-file PATH`             | `log/wm-ws-monitor.log` | Append activity logs here; create parent directories as needed.             |
 
 Native example with every operational parameter, with Engine on the same host:
 
@@ -381,18 +380,18 @@ Each connection parameter below is both a build argument (`--build-arg`) and an
 environment variable (`docker run -e`). A build argument changes the image's
 default; a runtime environment variable overrides that default for one container.
 
-| Image          | Parameter            | Default                              | Executable argument    |
-| -------------- | -------------------- | ------------------------------------ | ---------------------- |
-| `wm-engine`  | `QUEUE_ENDPOINT`   | `iriguchi.proxy.rlwy.net:37040`    | `--queue`            |
-| `wm-engine`  | `STATE_FILE`       | `/var/lib/wm-ws/state.jsonl`       | `--state-file`       |
-| `wm-engine`  | `LOG_FILE`         | `/var/log/wm-ws/wm-ws-engine.log`  | `--log-file`         |
-| `wm-monitor` | `LOG_FILE`         | `/var/log/wm-ws/wm-ws-monitor.log` | `--log-file`         |
-| `wm-monitor` | `WS_ID`            | `1`                                | `--ws-id`            |
-| `wm-monitor` | `ENGINE_HOSTNAME` | Empty | `--engine-hostname` (when nonempty; takes precedence over `ENGINE_IP`) |
-| `wm-monitor` | `ENGINE_IP`        | `127.0.0.1`                        | `--engine-ip`        |
-| `wm-monitor` | `ENGINE_PORT`      | `8080`                             | `--engine-port`      |
-| `wm-monitor` | `CENTRAL_HOSTNAME` | `altaria.proxy.rlwy.net`           | `--central-hostname` |
-| `wm-monitor` | `CENTRAL_PORT`     | `40931`                            | `--central-port`     |
+| Image          | Parameter            | Default                              | Executable argument                                                        |
+| -------------- | -------------------- | ------------------------------------ | -------------------------------------------------------------------------- |
+| `wm-engine`  | `QUEUE_ENDPOINT`   | `iriguchi.proxy.rlwy.net:37040`    | `--queue`                                                                |
+| `wm-engine`  | `STATE_FILE`       | `/var/lib/wm-ws/state.jsonl`       | `--state-file`                                                           |
+| `wm-engine`  | `LOG_FILE`         | `/var/log/wm-ws/wm-ws-engine.log`  | `--log-file`                                                             |
+| `wm-monitor` | `LOG_FILE`         | `/var/log/wm-ws/wm-ws-monitor.log` | `--log-file`                                                             |
+| `wm-monitor` | `WS_ID`            | `1`                                | `--ws-id`                                                                |
+| `wm-monitor` | `ENGINE_HOSTNAME`  | Empty                                | `--engine-hostname` (when nonempty; takes precedence over `ENGINE_IP`) |
+| `wm-monitor` | `ENGINE_IP`        | `127.0.0.1`                        | `--engine-ip`                                                            |
+| `wm-monitor` | `ENGINE_PORT`      | `8080`                             | `--engine-port`                                                          |
+| `wm-monitor` | `CENTRAL_HOSTNAME` | `altaria.proxy.rlwy.net`           | `--central-hostname`                                                     |
+| `wm-monitor` | `CENTRAL_PORT`     | `40931`                            | `--central-port`                                                         |
 
 The remaining CLI options have no Docker environment-variable mapping. To change
 them, use an explicit executable command as shown above.
