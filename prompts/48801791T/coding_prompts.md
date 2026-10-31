@@ -64,3 +64,7 @@ py .\WM_Central\clienteprueba.py localhost 8080 NAP#<protocol-version>#<ack-code
 ---
 
 ### *Implement a graphical interface for the central unit, keeping in mind that it will be deployed on Railway. Add buttons that allow the central unit to send operations and commands to other central units.*
+
+---
+
+### *Give me a function that calculates the accumulated volume taking as an input the flux sent by an station*
