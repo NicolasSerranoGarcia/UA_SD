@@ -433,6 +433,8 @@ def ws_start_conf_handler(data: dict):
     
     status = data.get("status")
     
+    st.log(f"{station_id}, {operation_code}, {status}")
+    
     if operation_code is None: # Irrigation started by the station itself
         
         if status == "OK":
@@ -441,10 +443,6 @@ def ws_start_conf_handler(data: dict):
             st.reset_telemetry(station_id)
             print(f"[IRRIGATION STARTED] Station WS-{station_id} started irrigating")
             st.log(f"[IRRIGATION STARTED] ]WS-{station_id} started irrigating (manual)")
-    
-        else:
-            
-            st.log("Invalid status")
         
     else: # Confirmation of an operation sent by the central or by a field operator
         
