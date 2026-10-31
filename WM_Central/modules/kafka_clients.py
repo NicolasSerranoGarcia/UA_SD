@@ -42,6 +42,8 @@ def start_kafka(bootstrap_servers: str, stop_event: threading.Event, topic_handl
 
 def _generic_consumer(bootstrap_servers: str, topic: str, stop_event: threading.Event, handleFunc):
 
+    consumer: Consumer = None
+
     try:
         
         consumer_config = {
@@ -59,16 +61,20 @@ def _generic_consumer(bootstrap_servers: str, topic: str, stop_event: threading.
             
             msg = consumer.poll(timeout=1.0)
             
-            if msg is None or msg.value() is None: # There is no message available in the topic at the moment
+            if msg is None: # First we check if the message is none
                 
                 continue
             
-            if msg.error():
+            if msg.error(): # Then if there has been an error
                 
                 if msg.error().code() != KafkaError._PARTITION_EOF: # This error just means that the consumer has reached the end of the partition
                     
                     print(f"[KAFKA ERROR] Consumer of topic {topic}: {msg.error()}") # If it is another error, it is printed
                     
+                continue
+            
+            if msg.value() is None: # And finally, if the value of the message if none
+                
                 continue
             
             try:
@@ -90,7 +96,9 @@ def _generic_consumer(bootstrap_servers: str, topic: str, stop_event: threading.
     
     finally:
         
-        consumer.close()
+        if consumer is not None:
+            
+            consumer.close()
 
 def send_event(topic: str, msg: dict, key: str | int | None = None):
     """Funtion that sends a message to a specific topic, with a possible key"""
@@ -103,7 +111,7 @@ def send_event(topic: str, msg: dict, key: str | int | None = None):
     try:
         
         msg_bytes = json.dumps(msg).encode(FORMAT)
-        key_bytes = str(key).encode(FORMAT) if key else None
+        key_bytes = str(key).encode(FORMAT) if key is not None else None
         
         _producer.produce(topic=topic, value=msg_bytes, key=key_bytes)
         _producer.poll(0)
