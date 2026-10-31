@@ -21,6 +21,8 @@
   .toolbar{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-bottom:.75rem}
   .toolbar .sep{width:1px;height:24px;background:var(--border);margin:0 .3rem}
   .toolbar .lbl{font-size:.75rem;color:#667}
+  input#duration{border:1px solid var(--border);border-radius:4px;padding:.35rem .5rem;font-size:.85rem;width:200px}
+  input#duration.bad{border-color:var(--red);background:#fff4f4}
   button{border:1px solid var(--border);background:#fff;border-radius:4px;padding:.35rem .7rem;cursor:pointer;font-size:.85rem}
   button:hover{background:#eef2f6}
   button.go{border-left:4px solid var(--green)} button.blk{border-left:4px solid var(--orange)}
@@ -63,11 +65,20 @@
 <main>
   <section>
     <div class="toolbar">
+      <span class="lbl">Duration:</span>
+      <input id="duration" type="text" inputmode="numeric" autocomplete="off"
+             placeholder="Empty = indefinite" oninput="this.classList.remove('bad')">
+      <span class="sep"></span>
       <span class="lbl">Selected WS:</span>
       <button class="go" id="bStart" onclick="cmdSelected('IRRIGATION')">Start watering</button>
       <button class="stp" id="bStop" onclick="cmdSelected('STOP')">Stop watering</button>
       <button class="blk" id="bBlock" onclick="cmdSelected('BLOCK')">Block WS</button>
       <button class="act" id="bAct" onclick="cmdSelected('ACTIVATE')">Activate WS</button>
+      <span class="sep"></span>
+      <span class="lbl">All WS:</span>
+      <button class="go" onclick="cmdAll('IRRIGATION')">Start all</button>
+      <button class="blk" onclick="cmdAll('BLOCK')">Block all</button>
+      <button class="act" onclick="cmdAll('ACTIVATE')">Activate all</button>
       <span class="sep"></span>
       <button onclick="refresh()">Refresh</button>
     </div>
@@ -115,7 +126,7 @@
 
 <script>
 const CLS = {"Available":"s-av","Watering":"s-wa","Leak":"s-le","Out of service":"s-oo","Disconnected":"s-di"};
-const LABEL = {"Available":"AVAILABLE","Watering":"WATERING","Leak":"LEAK","Out of service":"OUT OF SERVICE","Disconnected":"DISCONNECTED"};
+const LABEL = {"Available":"AVAILABLE","Watering":"WATERING","Leak":"LEAK","Out of service":"Out of Service","Disconnected":"DISCONNECTED"};
 const ALLOWED = {IRRIGATION:["Available"], STOP:["Watering"], BLOCK:["Available","Watering"], ACTIVATE:["Out of service"]};
 const ORDER = ["Available","Watering","Leak","Out of service","Disconnected"];
 
@@ -135,20 +146,44 @@ async function postJson(url, body){
   return {ok:r.ok, data: await r.json().catch(() => ({}))};
 }
 
-function askDuration(){
-  const v = parseInt(prompt("Irrigation duration"), 10);
-  return (Number.isInteger(v) && v > 0) ? v : null;
+// Empty textbox -> null (indefinite irrigation). Otherwise it must be a positive whole number.
+function readDuration(){
+  const box = $("duration");
+  const raw = box.value.trim();
+  if(raw === "") return {ok:true, value:null};
+  if(!/^\d+$/.test(raw) || parseInt(raw, 10) <= 0){
+    box.classList.add("bad");
+    flash("Duration must be a positive whole number (or empty for indefinite)");
+    return {ok:false};
+  }
+  return {ok:true, value:parseInt(raw, 10)};
 }
 
 async function cmdSelected(command){
   if(selected === null){ flash("Select a station first"); return; }
   const body = {command};
   if(command === "IRRIGATION"){
-    body.duration = askDuration();
-    if(body.duration === null){ flash("Invalid duration"); return; }
+    const d = readDuration();
+    if(!d.ok) return;
+    body.duration = d.value;
   }
   const {ok, data} = await postJson(`/api/stations/${selected}/command`, body);
   flash(ok ? `${command} sent to WS-${selected}` : `Error: ${data.error || "request failed"}`);
+  setTimeout(refresh, 600);
+}
+
+async function cmdAll(command){
+  const body = {command};
+  let extra = "";
+  if(command === "IRRIGATION"){
+    const d = readDuration();
+    if(!d.ok) return;
+    body.duration = d.value;
+    extra = d.value === null ? " (indefinite duration)" : ` (duration ${d.value})`;
+  }
+  if(!confirm(`Send ${command}${extra} to every station where it applies?`)) return;
+  const {ok, data} = await postJson("/api/command-all", body);
+  flash(ok ? `${command}: sent to ${data.sent.length} WS, skipped ${data.skipped.length}` : `Error: ${data.error || "request failed"}`);
   setTimeout(refresh, 600);
 }
 
@@ -172,7 +207,7 @@ function render(){
   const counts = Object.fromEntries(ORDER.map(k => [k, 0]));
   stations.forEach(s => { if(s.status in counts) counts[s.status]++; });
   $("summary").innerHTML = ORDER.map(k =>
-    `<div class="kv"><span>${LABEL[k] === "OUT OF SERVICE" ? "Out of service" : k}</span><b>${counts[k]}</b></div>`).join("");
+    `<div class="kv"><span>${LABEL[k] === "Out of Service" ? "Out of Service" : k}</span><b>${counts[k]}</b></div>`).join("");
 
   // Selected station detail + button availability
   const s = stations.find(x => x.id === selected);
@@ -207,7 +242,7 @@ function renderLog(events){
   const box = $("log");
   const atTop = box.scrollTop < 5;
   box.innerHTML = events.map(line => {
-    const cls = /leak|disconnected|error|KO/i.test(line) ? "l" : /out of service|block/i.test(line) ? "o" : "";
+    const cls = /leak|disconnected|error|KO|denied/i.test(line) ? "l" : /out of service|block/i.test(line) ? "o" : "";
     return `<div class="${cls}">${esc(line)}</div>`;
   }).join("");
   if(atTop) box.scrollTop = 0;
