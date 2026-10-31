@@ -78,7 +78,7 @@ TEST(Process, EngineRecoversExposedMeasurementsAfterHardKill) {
             if (!std::regex_search(contents, liters, std::regex{R"("total_liters":([0-9.eE+-]+))"}) ||
                 !std::regex_search(contents, time, std::regex{R"("total_time":([0-9.eE+-]+))"})) continue;
             EXPECT_GE(std::stod(liters[1]) + 0.0051, water);
-            EXPECT_GE(std::stod(time[1]) + 0.0051, elapsed);
+            EXPECT_GE(std::stod(time[1]) * 60 + 0.0051, elapsed);
             found = true;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds{20});

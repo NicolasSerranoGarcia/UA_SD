@@ -400,14 +400,20 @@ them, use an explicit executable command as shown above.
 The named volume in the run example retains pending confirmations and final water
 totals when the container is recreated. Keep the same volume for recovery of that
 station; give independent stations separate volumes. Kafka IDs must be numeric
-to match Central/FO and modulo routing; legacy alphanumeric HCP IDs support health
-checks only. WS consumes only its `station_id % partition_count` partition of
-`central-ops` and still filters station IDs to handle modulo collisions.
+to match Central/FO; legacy alphanumeric HCP IDs support health checks only.
+Central keys commands with the canonical decimal station ID and uses librdkafka's
+default partitioner. WS consumes the matching CRC32-key partition of `central-ops`
+and still filters station IDs because different recipients can share a partition.
+Topic counts come from metadata, refreshed every five seconds.
 
 WS-produced telemetry uses `operator_id % partition_count` when there is an owning
 FO. Without an FO, it uses the station ID for routing; Central reads all partitions.
 Confirmations and final summaries use the station ID. Wire fields match
 [the repository README](../Readme.md); checkpoint metadata is local only.
+Operation codes remain JSON integers and support FO's full unsigned 128-bit UUID
+range. Large codes are stored as exact decimal strings inside the local checkpoint
+and emitted as numeric JSON tokens on Kafka. Request `duration` is in seconds;
+final `total_time` is in minutes, including recovered and interrupted irrigations.
 
 Central should retry an operation with the same `operation_code` until it receives
 its confirmation. WS persists operation intent before valve changes and reuses
@@ -424,9 +430,11 @@ previously exposed committed measurements (within displayed rounding). Valve
 closure does not wait for disk I/O; final totals are persisted before their summary
 is published. Recovery never adds water or elapsed time from time spent offline.
 This is a durable simulated-meter guarantee, not a claim to measure physical water
-between disk commits. Existing unversioned checkpoints remain readable; new local
-checkpoints carry version 1. Broker acknowledgements confirm Kafka delivery, not
-Central processing, and a crash around acknowledgement may still cause a replay.
+between disk commits. New local checkpoints carry version 2. Unversioned and
+version 1 checkpoints remain readable; pending final durations saved in seconds
+are converted to minutes once during upgrade. Broker acknowledgements confirm
+Kafka delivery, not Central processing, and a crash around acknowledgement may
+still cause a replay.
 
 Central integration: NAP health reports indicate Monitor liveness. `KO` reports
 continue throughout a leak; a later `OK` reports repair. Healthy reports must not
@@ -434,11 +442,11 @@ erase Watering/Out-of-service state or clear a deliberate block. Central must
 mark a lost Monitor connection as Disconnected (including EOF). Telemetry must
 not override Monitor-derived disconnection.
 
-The bundled Central currently closes its health socket after acknowledging `KO`
-(`WM_Central/modules/NAPManager.py`). Its handler must keep the connection open
-for continuous leak/repair reporting to work end to end. Monitor cannot prevent
-a peer from closing the connection; it treats that as a connection failure and
-reconnects. See [the acceptance notes](ACCEPTANCE.md) for this integration gate.
+The bundled Central keeps its health socket open after acknowledging `KO`.
+Final-summary and health handlers must also agree on state precedence: a late
+summary must not clear a leak or administrative block, and repair must not restore
+an irrigation that already ended. See [the acceptance notes](ACCEPTANCE.md) for
+the complete-system checks.
 
 Build argument example:
 

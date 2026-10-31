@@ -30,7 +30,7 @@ formats are unchanged. `DC` is a WS-local HCP extension for Central availability
 | Transaction preservation | Write-ahead intent, cached operations, pending outbox, synced journal and recovery tests | Verify real Central accounting under replay |
 | Concurrent operation | Separate workers; simultaneous console/health service; second socket cannot displace the active Monitor | Concurrent requests from multiple real FO instances |
 | Recovery with minimal restarts | Native outage recovery; actual Docker Engine recreation at a new IP without restarting Monitor | Rehearse failures across the required machines |
-| ID-modulo routing and collisions | Partition and recipient-filter tests; Kafka mock-broker routing; isolated station IDs | Two real FO/station pairs, including a shared partition |
+| Recipient routing and collisions | Outgoing ID-modulo routing; Central-keyed command assignment; mock broker with default partitioning and recipient filtering | Two real FO/station pairs, including a shared partition |
 | Kafka interruption and recovery | Mock-broker outage and retained final-summary delivery tests | Repeat with the deployed Kafka service |
 | Storage failures | Invalid versions, corrupt slots, unwritable storage, and controlled service failure | Inspect the deployed persistent-volume configuration |
 | Usable interfaces and controlled errors | Live metrics; input/backspace/Enter; visible Central status; fatal diagnostics; headless Qt tests | Screenshots and observation at the evaluator's terminal size |
@@ -90,12 +90,26 @@ Verification: 39 Monitor/backend GUI tests passed on native Windows and Linux;
 These tests include repeated `KO`, quick repair, late recovery acknowledgement,
 and same-socket recovery.
 
-The bundled Central still returns `False` after acknowledging `KO` in
-`WM_Central/modules/NAPManager.py`; `WM_Central/WM_Central.py` then closes the
-socket. Central must keep that health connection open for this lifecycle to work
-end to end. Its healthy-report handler must also preserve administrative blocking
-and watering state rather than treating every `OK` as an activation. These are
-teammate integration dependencies; this change does not modify Central.
+The bundled Central now keeps its health connection open after acknowledging
+`KO`. Its completion and healthy-report handlers must also preserve administrative
+blocking and avoid restoring an irrigation that the leak already ended. These
+are complete-system state-precedence checks; WS tests alone do not establish them.
+
+## Central/FO interface compatibility (2026-10-30)
+
+Engine accepts FO's full unsigned 128-bit numeric UUID operation codes, keeps their
+digits exact through command/reply checkpoints, and emits numeric confirmations.
+Its command consumer follows Central's canonical station-key CRC32 partitioning;
+WS-produced records retain recipient-modulo routing. Metadata supplies the counts.
+Final `total_time` uses minutes while request durations and meter snapshots use
+seconds. Checkpoint version 2 upgrades pending version 1/unversioned final totals
+once, including recovery after an interrupted session.
+
+Verification: all 76 Engine/Station/Journal/Service tests passed on native Windows
+and isolated Linux, including the container's older Boost version. All 22 native
+process tests passed. The mock-broker case uses Central's actual default key
+partitioner on a partition different from ID modulo, and verifies an exact UUID
+confirmation on the wire. Central and FO source were not changed or cloud-tested.
 
 ## Full-system evaluation gate
 

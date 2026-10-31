@@ -1,0 +1,30 @@
+digraph WaterManagement {
+ graph [rankdir=TB, bgcolor="white", pad="0.18", nodesep="0.4", ranksep="0.75", fontname="Arial", fontsize=12];
+ node [shape=box, style=filled, fillcolor=white, color="#566474", fontname="Arial", fontsize=11, margin="0.14,0.1"];
+ edge [color="#536276", fontname="Arial", fontsize=10, arrowsize=0.7];
+ subgraph cluster_fo {
+  label="LAB PC 1"; color="#aeb7c2";
+  fo [label="Field Operators\nWM_FO (Python)"];
+ }
+ subgraph cluster_cloud {
+  label="CLOUD / RAILWAY"; color="#9caec1";
+  db [label="SQLite\nstations and operators", shape=cylinder, fillcolor="#f4f5f6"];
+  central [label="Central\nWM_Central (Python)", fillcolor="#edf3f8"];
+  kafka [label="Kafka\nrequests and results", fillcolor="#edf3f8"];
+  {rank=same; db; central; kafka;}
+  db -> central [dir=both, label="persistent state", constraint=false];
+  central -> kafka [dir=both, label="Kafka messages", constraint=false];
+ }
+ subgraph cluster_ws {
+  label="LAB PC 2 / WATERING STATION"; color="#aeb7c2";
+  monitor [label="Monitor\nWM_WS_M (C++)"];
+  engine [label="Engine\nWM_WS_E (C++)"];
+  journal [label="Local journal\nintent, meter, outbox", shape=cylinder, fillcolor="#f4f5f6"];
+  {rank=same; monitor; engine;}
+  monitor -> engine [dir=both, label="HCP / TCP\nID, HC, AC, DC", constraint=false];
+  engine -> journal [dir=both, label="recovery"];
+ }
+ fo -> kafka [dir=both, label="requests / notifications\nand owned telemetry"];
+ central -> monitor [dir=both, label="NAP / TCP\nregistration, activation, health"];
+ kafka -> engine [dir=both, label="commands / confirmations\nand measurements"];
+}
