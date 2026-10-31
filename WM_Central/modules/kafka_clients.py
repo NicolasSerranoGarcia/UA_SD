@@ -8,14 +8,7 @@ from confluent_kafka.admin import AdminClient
 FORMAT = "utf-8"
 
 _producer: Producer | None = None
-_stop_event: threading.Event | None = None
-
-def _on_delivery(err, msg):
-    if err is not None:
-        st.log(f"[KAFKA ERROR] NOT delivered to {msg.topic()}: {err}")
-    else:
-        st.log(f"[KAFKA] Delivered to {msg.topic()} p{msg.partition()} offset {msg.offset()}")
-        
+_stop_event: threading.Event | None = None    
 
 def start_kafka(bootstrap_servers: str, stop_event: threading.Event, topic_handlers: dict):
     
@@ -64,10 +57,7 @@ def _generic_consumer(bootstrap_servers: str, topic: str, stop_event: threading.
         
         consumer = Consumer(consumer_config)
         
-        def _on_assign(c, partitions):
-            st.log(f"[KAFKA] Consumer of '{topic}' joined: partitions {[p.partition for p in partitions]}")
-        
-        consumer.subscribe([topic], on_assign=_on_assign)
+        consumer.subscribe([topic])
         
         while not stop_event.is_set():
             
@@ -92,8 +82,6 @@ def _generic_consumer(bootstrap_servers: str, topic: str, stop_event: threading.
                 continue
             
             try:
-                
-                st.log(f"[KAFKA RX] {topic}: {msg.value()[:200]}")
                 
                 data = json.loads(msg.value().decode(FORMAT))
                 handleFunc(data)
@@ -129,7 +117,7 @@ def send_event(topic: str, msg: dict, key: str | int | None = None):
         msg_bytes = json.dumps(msg).encode(FORMAT)
         key_bytes = str(key).encode(FORMAT) if key is not None else None
         
-        _producer.produce(topic=topic, value=msg_bytes, key=key_bytes, on_delivery=_on_delivery)
+        _producer.produce(topic=topic, value=msg_bytes, key=key_bytes)
         _producer.poll(0)
         
     except Exception as e:
