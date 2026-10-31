@@ -5,6 +5,7 @@
 #include "kafka/journal.hpp"
 #include <iostream>
 #include <atomic>
+#include <future>
 #include <librdkafka/rdkafkacpp.h>
 #include <librdkafka/rdkafka.h>
 #include <map>
@@ -26,6 +27,11 @@ void configure(RdKafka::Conf &configuration, const std::string &name, const std:
 } // namespace
 
 struct Service::Impl : RdKafka::DeliveryReportCb, RdKafka::EventCb {
+    struct MetadataResult {
+        RdKafka::ErrorCode error;
+        std::unique_ptr<RdKafka::Metadata> value;
+    };
+
     Engine &engine;
     std::string endpoint;
     Journal journal;
@@ -44,6 +50,7 @@ struct Service::Impl : RdKafka::DeliveryReportCb, RdKafka::EventCb {
     std::optional<bool> delivered;
     std::chrono::steady_clock::time_point nextMetadata{};
     std::chrono::steady_clock::time_point nextCheckpoint{};
+    std::future<MetadataResult> metadataRequest;
     std::jthread worker;
 
     Impl(Engine &engine, std::string endpoint, std::string stateFile)
@@ -53,6 +60,8 @@ struct Service::Impl : RdKafka::DeliveryReportCb, RdKafka::EventCb {
     ~Impl() {
         worker.request_stop();
         worker.join();
+        if (metadataRequest.valid())
+            metadataRequest.wait();
         if (producer)
             (void)producer->purge(RdKafka::Producer::PURGE_QUEUE | RdKafka::Producer::PURGE_INFLIGHT);
         if (consumer)
@@ -119,14 +128,26 @@ struct Service::Impl : RdKafka::DeliveryReportCb, RdKafka::EventCb {
     }
 
     void refreshMetadata(const std::string &id) {
-        if (std::chrono::steady_clock::now() < nextMetadata)
+        if (!metadataRequest.valid()) {
+            if (std::chrono::steady_clock::now() < nextMetadata)
+                return;
+            metadataRequest = std::async(std::launch::async, [this] {
+                RdKafka::Metadata *metadata = nullptr;
+                const auto error = producer->metadata(true, nullptr, &metadata, 5000);
+                return MetadataResult{error, std::unique_ptr<RdKafka::Metadata>{metadata}};
+            });
             return;
+        }
+        if (metadataRequest.wait_for(std::chrono::milliseconds{0}) != std::future_status::ready)
+            return;
+        const auto result = metadataRequest.get();
         nextMetadata = std::chrono::steady_clock::now() + std::chrono::seconds{5};
-        RdKafka::Metadata *result = nullptr;
-        if (producer->metadata(true, nullptr, &result, 100) != RdKafka::ERR_NO_ERROR)
+        if (result.error != RdKafka::ERR_NO_ERROR) {
+            logging::record() << "[Engine][Kafka] ws=" << id << " cannot read topic metadata: "
+                              << RdKafka::err2str(result.error) << "; queued messages will retry\n";
             return;
-        const std::unique_ptr<RdKafka::Metadata> metadata{result};
-        for (const auto *topic : *metadata->topics()) {
+        }
+        for (const auto *topic : *result.value->topics()) {
             if (topic->err() == RdKafka::ERR_NO_ERROR)
                 partitions[topic->topic()] = static_cast<int>(topic->partitions()->size());
         }
