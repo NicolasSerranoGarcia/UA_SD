@@ -83,7 +83,7 @@ The JSON structure used in this topic is the following:
   "type": "<string: Message type>",
   "operation_code": "<integer|null: ID of the confirmed or rejected operation; null if the message is not a response>",
   "status": "<string: OK if the operation was successfull, KO if not>",
-  "message": "<string: Message for the 'INFO' type>"
+  "message": "<string: Message for the 'ALERT' and 'INFO' types>"
   "reason": "<string: Reason for KO response for 'RESPONSE' type | Alert for 'ALERT' type>",
   "stations": "<array|null: List of requested stations (only for GET-STATIONS)>",
   "summary": "<tuple|null: Summary data for an irrigation session>"
@@ -101,7 +101,7 @@ The JSON structure used in this topic is the following:
 `"reason"`:
 
 - If the `"type"` == `"RESPONSE"` → explicative message of the KO response
-- If the `"type"` == `"ALERT"` → `"DISCONNECTED"`: the station the FO was serving lost connection with central; `"LEAK"`: the station the FO was serving had a leak; `"BLOCK"`: the central blocked the station FO was serving; `"STOP"`: the central stopped the station FO was serving
+- If the `"type"` == `"ALERT"` → `"DISCONNECTED"`: the station the FO was serving lost connection with central; `"LEAK"`: the station the FO was serving had a leak; `"BLOCK"`: the central or other FO blocked the station FO was serving; `"STOP"`: the central or other FO stopped the station FO was serving
   
 `"stations"` → list of tuples with the form (`<station_id>`, `<location>`,`<status>`)<br>
 `"summary"` → tuple with the form (`<station_id>`, `<total_time (mins)>`,`<total_liters (L)>`)
