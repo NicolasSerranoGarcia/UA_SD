@@ -98,7 +98,7 @@ The JSON structure used in this topic is the following:
 `"reason"`:
 
 - If the `"type"` == `"RESPONSE"` → explicative message of the KO response
-- If the `"type"` == `"ALERT"` → `"DISCONNECTED"`: the station the FO was serving lost connection with central; `"LEAK"`: the station the FO was serving had a leak 
+- If the `"type"` == `"ALERT"` → `"DISCONNECTED"`: the station the FO was serving lost connection with central; `"LEAK"`: the station the FO was serving had a leak; `"BLOCK"`: the central blocked the station FO was serving; `"STOP"`: the central stopped the station FO was serving
   
 `"stations"` → list of tuples with the form (`<station_id>`, `<location>`,`<status>`)<br>
 `"summary"` → tuple with the form (`<station_id>`, `<total_time (mins)>`,`<total_liters (L)>`)
