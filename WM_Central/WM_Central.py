@@ -459,7 +459,7 @@ def ws_start_conf_handler(data: dict):
                     st.reset_telemetry(station_id)
                 
                 if command in ("BLOCK", "STOP"):
-                    nap.alert_operator_serving(station_id, command)
+                    nap.alert_operator_serving(station_id, command, message=f"Central bloqued station WS-{station_id}")
                 
             elif status == "KO":
                 
@@ -484,7 +484,13 @@ def ws_start_conf_handler(data: dict):
                     
                 elif command in ("STOP", "BLOCK"):
                     
-                    db.set_station_serving_operator(station_id, None)
+                    actual_serving = db.get_station_serving_operator(station_id)
+                    if actual_serving is not None and actual_serving != operator_id:
+                        
+                        nap.alert_operator_serving(station_id, reason=command, message=f"Station serving was {command} by FO-{operator_id}")
+                    
+                    else:
+                        db.set_station_serving_operator(station_id, None)
                 
             elif status == "KO":
                
