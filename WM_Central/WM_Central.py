@@ -26,6 +26,12 @@ COMMAND_STATUS_TRADUCTION = {
 def _station_lost(station_id: int, reason: str):
     
     print(f"[NAP] Connection lost with station WS-{station_id}: {reason}")
+    
+    current_status = db.get_station_status(station_id)
+    
+    if current_status not in (None, "Disconnected", "Leak"):
+        db.set_station_previous_status(station_id, current_status)
+    
     db.set_station_status(station_id, "Disconnected")
     nap.alert_operator_serving(station_id, "DISCONNECTED")
     st.log(f"[CONNECTION LOST] WS-{station_id} disconnected: {reason}")
