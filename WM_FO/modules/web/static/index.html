@@ -15,21 +15,24 @@
         .volume-val { font-size: 1.2rem; color: #4ade80; text-align: center; margin-bottom: 10px;}
         
         .badge { padding: 4px 10px; border-radius: 999px; font-size: 0.85rem; font-weight: 600; display: inline-block; }
-        /* Correction Guide Colors[cite: 6] */
-        .st-Available { background: #22c55e; color: #000; } /* VERDE */
-        .st-Watering { background: #22c55e; color: #000; animation: blinker 1s linear infinite; } /* VERDE parpadeante */
-        .st-Leak { background: #ef4444; color: #fff; } /* ROJO */
-        .st-Out { background: #f97316; color: #fff; } /* NARANJA */
-        .st-Disconnected { background: #6b7280; color: #fff; } /* GRIS */
+        .st-Available { background: #22c55e; color: #000; } 
+        .st-Watering { background: #22c55e; color: #000; animation: blinker 1s linear infinite; } 
+        .st-Leak { background: #ef4444; color: #fff; } 
+        .st-Out { background: #f97316; color: #fff; } 
+        .st-Disconnected { background: #6b7280; color: #fff; }
 
-        @keyframes blinker {
-          50% { opacity: 0.5; }
-        }
+        @keyframes blinker { 50% { opacity: 0.5; } }
 
         .form-group { display: flex; gap: 8px; margin-bottom: 12px; }
         input, textarea { background: #0f172a; border: 1px solid #475569; color: white; padding: 8px; border-radius: 4px; width: 100%; }
         button { background: var(--primary); color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-weight: 600; }
-        button.btn-danger { background: var(--danger); } button.btn-success { background: var(--success); } button.btn-warning { background: var(--warning); color: black; }
+        button.btn-danger { background: var(--danger); } 
+        button.btn-success { background: var(--success); } 
+        
+        /* NUEVOS ESTILOS PARA LOS BOTONES */
+        button.btn-darkblue { background: #1e3a8a; color: white; }
+        button.btn-orange { background: #f97316; color: white; }
+
         table { width: 100%; border-collapse: collapse; margin-top: 10px; } th, td { text-align: left; padding: 8px; border-bottom: 1px solid #334155; }
         .log-box { max-height: 250px; overflow-y: auto; background: #0f172a; padding: 10px; font-family: monospace; font-size: 0.9rem; }
         .log-SUCCESS { color: #4ade80; } .log-ERROR { color: #f87171; } .log-INFO { color: #93c5fd; } .log-ALERT { color: #facc15; font-weight: bold; }
@@ -63,7 +66,7 @@
                 <button class="btn-success" onclick="sendAction('IRRIGATION')">Irrigate</button>
             </div>
             <div class="form-group">
-                <button class="btn-danger" style="width:33%" onclick="sendAction('BLOCK')">Block</button>
+                <button class="btn-orange" style="width:33%" onclick="sendAction('BLOCK')">Block</button>
                 <button class="btn-warning" style="width:33%" onclick="sendAction('ACTIVATE')">Activate</button>
                 <button class="btn-danger" style="width:33%; background:#7f1d1d;" onclick="sendAction('STOP')">Stop</button>
             </div>

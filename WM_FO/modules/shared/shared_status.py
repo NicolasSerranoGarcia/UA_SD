@@ -4,7 +4,7 @@ import time
 
 central_notis_queue = queue.Queue()
 
-state_lock = threading.Lock()
+state_lock = threading.RLock()
 fo_state = {
     "operator_id": None,
     "station_served": None,
