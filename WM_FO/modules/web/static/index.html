@@ -10,10 +10,22 @@
         .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 10px; margin-bottom: 20px; }
         .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
         .card { background: var(--card); padding: 20px; border-radius: 8px; border: 1px solid #334155; }
+        
         .flux-val { font-size: 2.5rem; font-weight: bold; color: #38bdf8; margin: 10px 0; text-align: center; }
+        .volume-val { font-size: 1.2rem; color: #4ade80; text-align: center; margin-bottom: 10px;}
+        
         .badge { padding: 4px 10px; border-radius: 999px; font-size: 0.85rem; font-weight: 600; display: inline-block; }
-        .st-Available { background: #166534; color: #dcfce7; } .st-Watering { background: #0284c7; color: #e0f2fe; }
-        .st-Leak { background: #991b1b; color: #fee2e2; } .st-Out { background: #9a3412; color: #ffedd5; } .st-Disconnected { background: #475569; color: #f1f5f9; }
+        /* Correction Guide Colors[cite: 6] */
+        .st-Available { background: #22c55e; color: #000; } /* VERDE */
+        .st-Watering { background: #22c55e; color: #000; animation: blinker 1s linear infinite; } /* VERDE parpadeante */
+        .st-Leak { background: #ef4444; color: #fff; } /* ROJO */
+        .st-Out { background: #f97316; color: #fff; } /* NARANJA */
+        .st-Disconnected { background: #6b7280; color: #fff; } /* GRIS */
+
+        @keyframes blinker {
+          50% { opacity: 0.5; }
+        }
+
         .form-group { display: flex; gap: 8px; margin-bottom: 12px; }
         input, textarea { background: #0f172a; border: 1px solid #475569; color: white; padding: 8px; border-radius: 4px; width: 100%; }
         button { background: var(--primary); color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-weight: 600; }
@@ -25,16 +37,20 @@
 </head>
 <body>
     <div class="header">
-        <div><h2 style="margin:0;">Field Operator #{{ operator_id }}</h2></div>
+        <div><h2 style="margin:0;">Field Operator #<span id="op_id">{{ operator_id }}</span></h2></div>
         <div id="served-indicator" class="badge st-Disconnected">Unassigned</div>
     </div>
     <div class="grid">
         <div class="card">
             <h3>Live Telemetry</h3>
-            <div style="text-align:center; padding:15px; background:#0f172a; border:1px solid #3b82f6; border-radius:6px; margin-bottom:15px;">
-                <div id="tele-station" style="color:var(--muted);">No station selected</div>
+            <div style="padding:15px; background:#0f172a; border:1px solid #3b82f6; border-radius:6px; margin-bottom:15px;">
+                <div style="display:flex; justify-content: space-between;">
+                    <div id="tele-station" style="color:var(--muted);">No station selected</div>
+                    <div id="tele-operator" style="color:var(--muted); font-size:0.9rem;"></div>
+                </div>
                 <div id="tele-flux" class="flux-val">-- L/min</div>
-                <div id="tele-time" style="color:var(--muted); font-size:0.8rem;">Waiting for data...</div>
+                <div id="tele-volume" class="volume-val">Acc. Vol: -- L</div>
+                <div id="tele-time" style="color:var(--muted); font-size:0.8rem; text-align:center;">Waiting for data...</div>
             </div>
             <div id="summary-container" style="display:none; background:#064e3b; padding:10px; border-radius:6px; margin-bottom:15px;">
                 <strong>Last Summary:</strong> <span id="summary-text"></span>
@@ -76,38 +92,66 @@
         </div>
     </div>
     <script>
+        const opId = document.getElementById('op_id').innerText;
+
         async function updateDashboard() {
-            const res = await fetch('/api/state');
-            const state = await res.json();
-            
-            const badge = document.getElementById('served-indicator');
-            if (state.station_served !== null) {
-                badge.textContent = `WS-${state.station_served}` + (state.irrigating ? ' (Irrigating)' : '');
-                badge.className = 'badge ' + (state.irrigating ? 'st-Watering' : 'st-Available');
-                document.getElementById('tele-station').textContent = `WS-${state.station_served}`;
-                document.getElementById('tele-flux').textContent = state.current_flux !== null ? `${state.current_flux} L/min` : '0.0 L/min';
-                document.getElementById('tele-time').textContent = state.last_telemetry_ts || 'Waiting...';
+            try {
+                const res = await fetch('/api/state');
+                const state = await res.json();
+                
+                const badge = document.getElementById('served-indicator');
+                if (state.station_served !== null) {
+                    badge.textContent = `WS-${state.station_served}` + (state.irrigating ? ' (Watering)' : ' (Available)');
+                    badge.className = 'badge ' + (state.irrigating ? 'st-Watering' : 'st-Available');
+                    document.getElementById('tele-station').textContent = `WS-${state.station_served}`;
+                    
+                    // Show Operator ID during watering[cite: 6]
+                    document.getElementById('tele-operator').textContent = state.irrigating ? `Operator: FO-${opId}` : '';
+                    
+                    document.getElementById('tele-flux').textContent = state.current_flux !== null ? `${state.current_flux} L/min` : '0.0 L/min';
+                    
+                    // Show Accumulated Volume[cite: 6]
+                    document.getElementById('tele-volume').textContent = state.irrigating ? `Acc. Vol: ${state.accumulated_volume.toFixed(2)} L` : '';
+
+                    document.getElementById('tele-time').textContent = state.last_telemetry_ts || 'Waiting...';
+                }
+                if (state.last_summary) {
+                    const s = state.last_summary;
+                    document.getElementById('summary-container').style.display = 'block';
+                    document.getElementById('summary-text').innerHTML = `WS-${s.station_id} | ${s.total_time}m | ${s.total_liters}L | ${s.avg_flux}L/m`;
+                }
+                if (state.stations.length > 0) {
+                    document.getElementById('stations-tbody').innerHTML = state.stations.map(st => {
+                        // Handle 'Out of service' properly for CSS class
+                        let stClass = st[2];
+                        if (st[2] === "Out of service") stClass = "Out";
+
+                        let displayStatus = st[2];
+                        if (st[2] === "Out of service") displayStatus = "Out of Service"; // Match rubric[cite: 6]
+
+                        return `<tr><td>WS-${st[0]}</td><td>${st[1]}</td><td><span class="badge st-${stClass}">${displayStatus}</span></td>
+                        <td><button onclick="document.getElementById('station_id').value=${st[0]}">Sel</button></td></tr>`;
+                    }).join('');
+                }
+                document.getElementById('logs-box').innerHTML = state.logs.map(l => `<div class="log-${l.level}">[${l.time}] ${l.message}</div>`).join('');
+            } catch (e) {
+                console.error("Error fetching state:", e);
+                // Connection lost handling[cite: 7]
+                document.getElementById('logs-box').innerHTML = `<div class="log-ERROR">[!] Error connecting to WM_FO backend.</div>` + document.getElementById('logs-box').innerHTML;
             }
-            if (state.last_summary) {
-                const s = state.last_summary;
-                document.getElementById('summary-container').style.display = 'block';
-                document.getElementById('summary-text').innerHTML = `WS-${s.station_id} | ${s.total_time}m | ${s.total_liters}L | ${s.avg_flux}L/m`;
-            }
-            if (state.stations.length > 0) {
-                document.getElementById('stations-tbody').innerHTML = state.stations.map(st => 
-                    `<tr><td>WS-${st[0]}</td><td>${st[1]}</td><td><span class="badge st-${String(st[2]).split(' ')[0]}">${st[2]}</span></td>
-                    <td><button onclick="document.getElementById('station_id').value=${st[0]}">Sel</button></td></tr>`
-                ).join('');
-            }
-            document.getElementById('logs-box').innerHTML = state.logs.map(l => `<div class="log-${l.level}">[${l.time}] ${l.message}</div>`).join('');
         }
         async function sendAction(type) {
             const station_id = parseInt(document.getElementById('station_id').value);
             const dur_val = document.getElementById('duration').value;
             const duration = dur_val ? parseInt(dur_val) : null;
             if (type !== 'GET-STATIONS' && !station_id) return alert('Enter an ID.');
-            await fetch('/api/command', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type, station_id, duration}) });
-            updateDashboard();
+            
+            try {
+                await fetch('/api/command', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type, station_id, duration}) });
+                updateDashboard();
+            } catch (e) {
+                alert("Impossible to connect with WM_Central"); // Error handling[cite: 7]
+            }
         }
         function refreshStations() { sendAction('GET-STATIONS'); }
         async function runFile() {

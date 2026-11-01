@@ -25,7 +25,7 @@ def send_and_wait_central(cmd_type: str, station_id: int | None = None, duration
                 break
 
         ok = send_command(producer, operator_id, station_id, cmd_type, operation_code, duration)
-        if not ok: return {"status": "KO", "reason": "Producer Error"}
+        if not ok: return {"status": "KO", "reason": "Impossible to connect with WM_Central"} # Handled error[cite: 7]
 
         start_time = time.time()
         while time.time() - start_time < timeout:
@@ -35,7 +35,7 @@ def send_and_wait_central(cmd_type: str, station_id: int | None = None, duration
                     return response
             except queue.Empty:
                 continue
-        return {"status": "TIMEOUT", "reason": "Timeout waiting for Central response"}
+        return {"status": "TIMEOUT", "reason": "Timeout waiting for Central response (WM_Central might be down)"} # Handled error[cite: 7]
 
 @app.route("/")
 def index():
@@ -67,6 +67,7 @@ def api_command():
             if cmd_type == "IRRIGATION":
                 fo_state["station_served"] = station_id
                 fo_state["irrigating"] = True
+                fo_state["accumulated_volume"] = 0.0 # Reset accumulated volume
                 dur_text = f"{duration}s" if duration else "indefinite"
                 add_log("SUCCESS", f"Irrigation started in WS-{station_id} ({dur_text})")
             elif cmd_type in ("BLOCK", "ACTIVATE", "STOP"):
@@ -105,10 +106,11 @@ def api_batch():
                 with state_lock:
                     fo_state["station_served"] = st_id
                     fo_state["irrigating"] = True
+                    fo_state["accumulated_volume"] = 0.0
                 dur_text = f"{dur}s" if dur else "indefinite"
                 add_log("SUCCESS", f"[Batch] WS-{st_id} irrigating ({dur_text}).")
             else:
-                add_log("ERROR", f"[Batch] Failed in WS-{st_id}")
+                add_log("ERROR", f"[Batch] Failed in WS-{st_id}. Reason: {resp.get('reason')}") # Added reason
             time.sleep(2)
 
     threading.Thread(target=_run_batch_bg, args=(commands,), daemon=True).start()
