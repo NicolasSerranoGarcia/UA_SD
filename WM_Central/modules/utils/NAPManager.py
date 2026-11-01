@@ -112,8 +112,11 @@ def process_nap_frame(client_socket: socket.socket, fields: list) -> tuple[bool,
                     
                     if current_status != "Leak":
                         
+                        if current_status != "Disconnected":
+                        
+                            db.set_station_previous_status(station_id, current_status or "Available")
+                        
                         db.set_station_status(station_id, "Leak")
-                        db.set_station_previous_status(station_id, current_status or "Available")
                         
                         print(f"[NAP] Leak detected in station {station_id}.")
                         st.log(f"WS-{station_id} leak detected")
