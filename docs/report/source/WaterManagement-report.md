@@ -173,6 +173,8 @@ before the next request. An indefinite request therefore needs to be stopped
 before playback can continue. FO's request handling and Kafka adapter are in
 [S5] and [S6]; file parsing is in [S7].
 
+![Field operator UI](../screenshots/screenshot-6.png)
+
 # 4. Inside a watering station {#station}
 
 ## 4.1 Engine: the physical simulation and its permissions
@@ -611,12 +613,12 @@ with a mounted database; SQLite is not a separate TCP database server.
 Use a separate terminal for each operator:
 
 ```sh
-docker run -it --name wm-fo-7 wm-fo 7 \
+docker run --rm -p 8001:8001 wm_fo 1 --web-port 8001 \
   --kafka-ip iriguchi.proxy.rlwy.net --kafka-port 37040
 ```
 
 ```sh
-docker run -it --name wm-fo-8 wm-fo 8 \
+docker run --rm -p 8002:8002 wm_fo 2 --web-port 8002 \
   --kafka-ip iriguchi.proxy.rlwy.net --kafka-port 37040
 ```
 
