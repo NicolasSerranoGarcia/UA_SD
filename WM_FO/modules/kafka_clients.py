@@ -4,6 +4,7 @@ import time
 from confluent_kafka import Consumer, Producer, KafkaException, KafkaError, TopicPartition
 from confluent_kafka.admin import AdminClient
 from modules.shared.shared_status import fo_state, state_lock, central_notis_queue, add_log
+from modules.utils import format_duration
 
 FORMAT = "utf-8"
 
@@ -20,7 +21,7 @@ def send_command(producer: Producer,
     
     if producer is None:
         add_log("ERROR", "Producer not created. Cannot connect to WM_Central.")
-        return
+        return False
     
     msg = {"operator_id": operator_id, 
            "station_id": station_id, 
@@ -36,7 +37,7 @@ def send_command(producer: Producer,
         
     except Exception as e:
         
-        add_log("[ERROR]", f"Failed to send message to Kafka. Impossible to connect with WM_Central: {e}")
+        add_log("ERROR", f"Failed to send message to Kafka. Impossible to connect with WM_Central: {e}")
         return False
 
 
@@ -90,7 +91,7 @@ def _generic_kafka_consumer(bootstrap_servers: str, operator_id: int, topic: str
     
     config = {
         "bootstrap.servers": bootstrap_servers,
-        "group.id": f"group-notis-{operator_id}",
+        "group.id": f"group-{topic}-{operator_id}",
         "auto.offset.reset": "latest",
         "enable.auto.commit": True,
         "session.timeout.ms": 6000,
@@ -105,11 +106,11 @@ def _generic_kafka_consumer(bootstrap_servers: str, operator_id: int, topic: str
         tp = TopicPartition(topic=topic, partition=dest_partition)
         
         consumer.assign([tp])
-        add_log("[INFO]", f"Consumer assigned to '{topic}' [Partition: {dest_partition}]")
+        add_log("INFO", f"Consumer assigned to '{topic}' [Partition: {dest_partition}]")
         
     except (Exception, KafkaException) as e:
         
-        add_log("[ERROR]", f"Failed creating consumer for '{topic}': {e}")
+        add_log("ERROR", f"Failed creating consumer for '{topic}': {e}")
         return
     
     try:
@@ -204,11 +205,13 @@ def _handle_summary(summary: tuple):
         
         if served is not None and int(origin_station) == int(served):
             
+            
             avg_flux = round(total_liters / total_time, 2) if (total_time is not None and total_time > 0) else 0
             fo_state["last_summary"] = {
                 "station_id": origin_station,
                 "total_time": total_time,
-                "total_liters": total_liters,
+                "total_time_label": format_duration(total_time),
+                "total_liters": round(total_liters, 2),
                 "avg_flux": avg_flux,
                 "timestamp": time.strftime("%H:%M:%S")
             }
@@ -217,4 +220,4 @@ def _handle_summary(summary: tuple):
 
     if served is not None and int(origin_station) == int(served):
         
-        add_log("SUCCESS", f"Irrigation finished in WS-{origin_station} | {total_time} min | {total_liters} L")
+        add_log("SUCCESS", f"Irrigation finished in WS-{origin_station} | {format_duration(total_time)} | {total_liters} L")
