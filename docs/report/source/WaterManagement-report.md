@@ -847,7 +847,7 @@ that the request is accepted and FO displays the flow readings while the station
 waters. When the time runs out, irrigation should stop automatically and FO
 should display the final duration and litres used.
 
-<!-- Add screenshot: timed irrigation in FO, showing the readings or final summary. -->
+![FO Irrigation](../screenshots/screenshot-7.png)
 
 ## 9.2 Blocking a station from FO
 
@@ -855,7 +855,7 @@ We send BLOCK to an Available station from FO and check the confirmation. The
 station should appear as Out of service, and a new irrigation request should be
 rejected. We then use ACTIVATE to make it available again.
 
-<!-- Add screenshot: FO's block confirmation and the station shown as Out of service. -->
+![FO Block](../screenshots/screenshot-8.png)
 
 ## 9.3 Reading requests from a file
 
@@ -864,7 +864,7 @@ for timed irrigation. We check that FO sends the requests in order, waits for
 each irrigation to finish and pauses four seconds before the next one. The log
 lets us compare the requests with the file.
 
-<!-- Add screenshot: the request file and FO's log during playback. -->
+![FO File reading](../screenshots/screenshot-9.png)
 
 # 10. Source references {#sources}
 
