@@ -28,7 +28,7 @@ classoption: titlepage
 
 # 1. General overview {#architecture}
 
-![Components, communication paths and persistent state. The arrows show message exchange; TCP client/server roles are explained below.](figures/architecture.png)
+![Components, communication paths and persistent state. The arrows show message exchange; TCP client/server roles are explained below.](../figures/architecture.png)
 
 We use two communication paths. **Kafka carries work and results**:
 requests, station commands, confirmations, measurements and final summaries.
@@ -221,7 +221,7 @@ refreshes watering time, flow and delivered volume without needing another
 command. Fault injection is also available while idle or blocked, so we can
 demonstrate the health behaviour without starting irrigation first.
 
-![Station 1 watering at 39.34 L/min, with 1.95 L delivered. Its terminal Monitor reports a healthy Engine and an available Central connection.](screenshot-2.png)
+![Station 1 watering at 39.34 L/min, with 1.95 L delivered. Its terminal Monitor reports a healthy Engine and an available Central connection.](../screenshots/screenshot-2.png)
 
 ## 4.3 Monitor: supervision without controlling the valve
 
@@ -244,7 +244,7 @@ shortcuts; opening a dialog does not pause monitoring. Routine logs stay in
 files, while fatal errors remain visible with a suggested next step. See [S9],
 [S13] and [S14].
 
-![Qt Monitor for station 1, with Engine healthy, Central available and the activity log open. The log shows HCP checks and acknowledged NAP reports.](screenshot-3.png)
+![Qt Monitor for station 1, with Engine healthy, Central available and the activity log open. The log shows HCP checks and acknowledged NAP reports.](../screenshots/screenshot-3.png)
 
 # 5. The socket protocols: NAP and HCP {#sockets}
 
@@ -557,7 +557,7 @@ Recovery is limited to the last saved measurements. Each independent station
 needs its own persistent volume so its journal survives container replacement
 and does not get overwritten by another station.
 
-![Leak at station 1: Engine's flow is zero, Monitor reports a fault, and Central shows LEAK. Monitor remains connected to Central; station 2 is Disconnected.](screenshot-4.png)
+![Leak at station 1: Engine's flow is zero, Monitor reports a fault, and Central shows LEAK. Monitor remains connected to Central; station 2 is Disconnected.](../screenshots/screenshot-4.png)
 
 # 8. Deployment {#deployment}
 
@@ -795,7 +795,7 @@ failure, we use `docker kill`. Detaching with `Ctrl+P`, then `Ctrl+Q` leaves
 the container running. The grading run uses prepared images and requires
 no recompilation.
 
-![FO requests a 120-second irrigation from station 1. Engine shows watering in progress, while the Qt Monitor reports a healthy Engine and an available Central connection.](screenshot-5.png)
+![FO requests a 120-second irrigation from station 1. Engine shows watering in progress, while the Qt Monitor reports a healthy Engine and an available Central connection.](../screenshots/screenshot-5.png)
 
 # 9. Testing and results {#testing}
 
