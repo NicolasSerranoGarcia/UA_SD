@@ -29,7 +29,7 @@ def send_nap_msg(client_socket:socket.socket, msg: str):
     
     client_socket.sendall(frame.encode(FORMAT))
 
-def alert_operator_serving(station_id: int, reason: str, message: str):
+def alert_operator_serving(station_id: int, reason: str, message: str = None):
     
     operator = db.get_station_serving_operator(station_id)
     
@@ -124,18 +124,24 @@ def process_nap_frame(client_socket: socket.socket, fields: list) -> tuple[bool,
                     send_nap_msg(client_socket, f"NAP#1.0#{ack_code}#3#{station_id}")
                     return True, station_id
                 
-                else:
+                elif status_msg == "OK":
                     
-                    # Reliability purposes. If the station was disconnected but central recieves heartbeat, passes to status "Available"
-                    if current_status == "Disconnected": 
-                        
-                        db.set_station_status(station_id, "Available")
+                    previous_status = db.get_station_previous_status(station_id) or "Available"
                     
-                    if current_status == "Leak":
+                    # If the station was disconnected but has a saved previous state, restore it
+                    if current_status == "Disconnected":
                         
-                        previous_status = db.get_station_previous_status(station_id) or "Available"
+                        restored_status = previous_status
+                        if restored_status == "Watering":
+                            restored_status = "Available"
                         
-                        # When a station recovers from a leak, if it was watering, now it is available
+                        db.set_station_status(station_id, restored_status)
+                        print(f"[NAP] Station {station_id} recovered from disconnect. Restored to status '{restored_status}'")
+                        st.log(f"WS-{station_id} recovered from disconnect. Restored to status '{restored_status}'")
+                    
+                    elif current_status == "Leak":
+                        
+                        # When a station recovers from a leak, if it was Watering now it is Available
                         if previous_status == "Watering":
                             
                             previous_status = "Available"

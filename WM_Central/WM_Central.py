@@ -433,8 +433,6 @@ def ws_start_conf_handler(data: dict):
     
     status = data.get("status")
     
-    st.log(f"{station_id}, {operation_code}, {status}")
-    
     if operation_code is None: # Irrigation started by the station itself
         
         if status == "OK":
