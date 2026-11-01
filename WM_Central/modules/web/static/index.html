@@ -243,7 +243,7 @@ function renderLog(events){
   const atTop = box.scrollTop < 5;
   box.innerHTML = events.map(line => {
     let cls = "";
-    if(/enrolled|activated|recovered|irrigation started|irrigation finished|started irrigating/i.test(line)) cls = "g";
+    if(/enrolled|activated|available|\bOK\b|recovered|irrigation started|irrigation finished|started irrigating/i.test(line)) cls = "g";
     else if(/leak|disconnected|connection lost|error|\bKO\b|denied/i.test(line)) cls = "l";
     else if(/out of service|block/i.test(line)) cls = "o";
     return `<div class="${cls}">${esc(line)}</div>`;
