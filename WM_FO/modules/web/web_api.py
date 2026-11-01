@@ -7,6 +7,7 @@ from modules.utils import read_file, parse_commands_content
 from modules.kafka_clients import send_command
 from modules.shared.shared_status import fo_state, state_lock, central_notis_queue, add_log
 
+DEFAULT_DURATION = 120
 cmd_lock = threading.Lock() 
 
 app = Flask(__name__, template_folder="static")
@@ -34,7 +35,7 @@ def send_and_wait_central(cmd_type: str, station_id: int | None = None, duration
                     return response
             except queue.Empty:
                 continue
-        return {"status": "TIMEOUT", "reason": "Timeout esperando a Central"}
+        return {"status": "TIMEOUT", "reason": "Timeout waiting for Central response"}
 
 @app.route("/")
 def index():
@@ -66,17 +67,17 @@ def api_command():
             if cmd_type == "IRRIGATION":
                 fo_state["station_served"] = station_id
                 fo_state["irrigating"] = True
-                dur_text = f"{duration}s" if duration else "indefinido"
-                add_log("SUCCESS", f"Riego iniciado en WS-{station_id} ({dur_text})")
+                dur_text = f"{duration}s" if duration else "indefinite"
+                add_log("SUCCESS", f"Irrigation started in WS-{station_id} ({dur_text})")
             elif cmd_type in ("BLOCK", "ACTIVATE", "STOP"):
                 fo_state["station_served"] = station_id
                 if cmd_type in ("BLOCK", "STOP"): fo_state["irrigating"] = False
-                add_log("SUCCESS", f"Comando {cmd_type} exitoso en WS-{station_id}")
+                add_log("SUCCESS", f"Command {cmd_type} successful in WS-{station_id}")
             elif cmd_type == "GET-STATIONS":
                 fo_state["stations"] = resp.get("stations", [])
-                add_log("SUCCESS", "Lista de estaciones actualizada.")
+                add_log("SUCCESS", "Station list updated successfully.")
     else:
-        add_log("ERROR", f"Fallo {cmd_type}: {resp.get('reason')}")
+        add_log("ERROR", f"Failed {cmd_type}: {resp.get('reason')}")
 
     return jsonify(resp)
 
@@ -94,7 +95,7 @@ def api_batch():
         commands = None
     
     if commands is None:
-        add_log("ERROR", "Fallo al procesar el lote.")
+        add_log("ERROR", "Failed to process the batch file or content.")
         return jsonify({"status": "KO"}), 400
 
     def _run_batch_bg(cmd_list):
@@ -104,10 +105,10 @@ def api_batch():
                 with state_lock:
                     fo_state["station_served"] = st_id
                     fo_state["irrigating"] = True
-                dur_text = f"{dur}s" if dur else "indefinido"
-                add_log("SUCCESS", f"[Lote] WS-{st_id} regando ({dur_text}).")
+                dur_text = f"{dur}s" if dur else "indefinite"
+                add_log("SUCCESS", f"[Batch] WS-{st_id} irrigating ({dur_text}).")
             else:
-                add_log("ERROR", f"[Lote] Fallo en WS-{st_id}")
+                add_log("ERROR", f"[Batch] Failed in WS-{st_id}")
             time.sleep(2)
 
     threading.Thread(target=_run_batch_bg, args=(commands,), daemon=True).start()

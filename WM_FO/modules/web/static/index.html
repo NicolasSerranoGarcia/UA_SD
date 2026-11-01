@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>WM_FO - Operador #{{ operator_id }}</title>
+    <title>WM_FO - Operator #{{ operator_id }}</title>
     <style>
         :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --muted: #94a3b8; --primary: #3b82f6; --success: #22c55e; --danger: #ef4444; --warning: #f59e0b; }
         * { box-sizing: border-box; font-family: system-ui, sans-serif; }
@@ -25,50 +25,50 @@
 </head>
 <body>
     <div class="header">
-        <div><h2 style="margin:0;">Operador de Campo #{{ operator_id }}</h2></div>
-        <div id="served-indicator" class="badge st-Disconnected">Sin asignar</div>
+        <div><h2 style="margin:0;">Field Operator #{{ operator_id }}</h2></div>
+        <div id="served-indicator" class="badge st-Disconnected">Unassigned</div>
     </div>
     <div class="grid">
         <div class="card">
-            <h3>Telemetría en Vivo</h3>
+            <h3>Live Telemetry</h3>
             <div style="text-align:center; padding:15px; background:#0f172a; border:1px solid #3b82f6; border-radius:6px; margin-bottom:15px;">
-                <div id="tele-station" style="color:var(--muted);">Ninguna estación</div>
+                <div id="tele-station" style="color:var(--muted);">No station selected</div>
                 <div id="tele-flux" class="flux-val">-- L/min</div>
-                <div id="tele-time" style="color:var(--muted); font-size:0.8rem;">Esperando datos...</div>
+                <div id="tele-time" style="color:var(--muted); font-size:0.8rem;">Waiting for data...</div>
             </div>
             <div id="summary-container" style="display:none; background:#064e3b; padding:10px; border-radius:6px; margin-bottom:15px;">
-                <strong>Último Resumen:</strong> <span id="summary-text"></span>
+                <strong>Last Summary:</strong> <span id="summary-text"></span>
             </div>
             
-            <h3>Acciones</h3>
+            <h3>Actions</h3>
             <div class="form-group">
-                <input type="number" id="station_id" placeholder="ID Estación" min="1">
-                <input type="number" id="duration" placeholder="Duración(s) (vacío=indef)" min="1">
-                <button class="btn-success" onclick="sendAction('IRRIGATION')">Regar</button>
+                <input type="number" id="station_id" placeholder="Station ID" min="1">
+                <input type="number" id="duration" placeholder="Duration(s) (empty=indef)" min="1">
+                <button class="btn-success" onclick="sendAction('IRRIGATION')">Irrigate</button>
             </div>
             <div class="form-group">
-                <button class="btn-danger" style="width:33%" onclick="sendAction('BLOCK')">Bloquear</button>
-                <button class="btn-warning" style="width:33%" onclick="sendAction('ACTIVATE')">Activar</button>
-                <button class="btn-danger" style="width:33%; background:#7f1d1d;" onclick="sendAction('STOP')">Detener</button>
+                <button class="btn-danger" style="width:33%" onclick="sendAction('BLOCK')">Block</button>
+                <button class="btn-warning" style="width:33%" onclick="sendAction('ACTIVATE')">Activate</button>
+                <button class="btn-danger" style="width:33%; background:#7f1d1d;" onclick="sendAction('STOP')">Stop</button>
             </div>
 
-            <h3 style="margin-top:20px;">Lotes</h3>
+            <h3 style="margin-top:20px;">Batches</h3>
             <div class="form-group">
-                <input type="text" id="file_path" placeholder="Ruta commands.txt">
-                <button onclick="runFile()">Ejecutar Ruta</button>
+                <input type="text" id="file_path" placeholder="Path to commands.txt">
+                <button onclick="runFile()">Execute Path</button>
             </div>
             <div class="form-group">
-                <textarea id="batch_text" rows="2" placeholder="O pega líneas (ej. 1#60 o 1 para indef)"></textarea>
-                <button onclick="runBatchText()">Enviar Lote</button>
+                <textarea id="batch_text" rows="2" placeholder="Or paste lines (e.g., 1#60 or 1 for indef)"></textarea>
+                <button onclick="runBatchText()">Send Batch</button>
             </div>
         </div>
         <div class="card">
             <div style="display:flex; justify-content:space-between;">
-                <h3>Estaciones</h3>
+                <h3>Stations</h3>
                 <button onclick="refreshStations()">GET-STATIONS</button>
             </div>
             <table>
-                <thead><tr><th>ID</th><th>Ubicación</th><th>Estado</th><th>Acción</th></tr></thead>
+                <thead><tr><th>ID</th><th>Location</th><th>Status</th><th>Action</th></tr></thead>
                 <tbody id="stations-tbody"></tbody>
             </table>
             <h3 style="margin-top:20px;">Logs</h3>
@@ -82,11 +82,11 @@
             
             const badge = document.getElementById('served-indicator');
             if (state.station_served !== null) {
-                badge.textContent = `WS-${state.station_served}` + (state.irrigating ? ' (Regando)' : '');
+                badge.textContent = `WS-${state.station_served}` + (state.irrigating ? ' (Irrigating)' : '');
                 badge.className = 'badge ' + (state.irrigating ? 'st-Watering' : 'st-Available');
                 document.getElementById('tele-station').textContent = `WS-${state.station_served}`;
                 document.getElementById('tele-flux').textContent = state.current_flux !== null ? `${state.current_flux} L/min` : '0.0 L/min';
-                document.getElementById('tele-time').textContent = state.last_telemetry_ts || 'Esperando...';
+                document.getElementById('tele-time').textContent = state.last_telemetry_ts || 'Waiting...';
             }
             if (state.last_summary) {
                 const s = state.last_summary;
@@ -105,7 +105,7 @@
             const station_id = parseInt(document.getElementById('station_id').value);
             const dur_val = document.getElementById('duration').value;
             const duration = dur_val ? parseInt(dur_val) : null;
-            if (type !== 'GET-STATIONS' && !station_id) return alert('Introduce un ID.');
+            if (type !== 'GET-STATIONS' && !station_id) return alert('Enter an ID.');
             await fetch('/api/command', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type, station_id, duration}) });
             updateDashboard();
         }
