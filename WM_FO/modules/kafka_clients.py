@@ -1,13 +1,11 @@
 import json
-import queue
 import threading
+import time
 from confluent_kafka import Consumer, Producer, KafkaException, KafkaError, TopicPartition
 from confluent_kafka.admin import AdminClient
+from modules.shared.shared_status import fo_state, state_lock, central_notis_queue, add_log
 
 FORMAT = "utf-8"
-
-central_notis_queue = queue.Queue() # Queue for the unicast response messages
-telemetry_queue = queue.Queue(maxsize=1) # Queue for the telemetry. Preserves only the most recent value
 
 ##########################
 ### PRODUCER FUNCTIONS ###
@@ -16,26 +14,30 @@ telemetry_queue = queue.Queue(maxsize=1) # Queue for the telemetry. Preserves on
 def send_command(producer: Producer,
                 operator_id: int, 
                 station_id: int | None, 
-                type: str, 
+                command_type: str, 
                 operation_code: int, 
                 duration: int | None = None):
     
     if producer is None:
-        print("[ERROR] Producer is not created. Command omitted.")
+        add_log("ERROR", "Producer not created. Cannot connect to WM_Central.")
         return
     
     msg = {"operator_id": operator_id, 
            "station_id": station_id, 
-           "command_type": type,
+           "command_type": command_type,
            "operation_code": operation_code,
-           "duration": duration}
+           "duration": duration
+        }
+    
     try: 
         producer.produce(topic="fo-req", value=json.dumps(msg).encode(FORMAT))
-        producer.flush()
+        producer.flush(timeout=3.0)
+        return True
         
     except Exception as e:
         
-        print(f"[ERROR] Failed to send message to Kafka: {e}")
+        add_log("[ERROR]", f"Failed to send message to Kafka. Impossible to connect with WM_Central: {e}")
+        return False
 
 
 ##########################
@@ -45,6 +47,9 @@ def send_command(producer: Producer,
 
 def start_consumers(bootstrap_servers: str, operator_id: int, stop_event: threading.Event):
     """Function that starts two consumers in different threads, each one listening to a different kafka topic"""
+    
+    with state_lock:
+        fo_state["operator_id"] = operator_id
     
     # Thread for 'central-notis' topic
     thread_notifications = threading.Thread(
@@ -63,25 +68,21 @@ def start_consumers(bootstrap_servers: str, operator_id: int, stop_event: thread
     thread_notifications.start()
     thread_telemetry.start()    
 
-def _num_partitions_for_topic(bootstrap_servers: str, topic: str):
-    """Function that consults the number of partitions of a specific topic"""
+def _num_partitions_for_topic(bootstrap_servers: str, topic: str) -> int:
+    """Queries the Kafka cluster for the number of partitions of a specific topic."""
     
     admin_client = AdminClient({"bootstrap.servers": bootstrap_servers})
-
     try:
         metadata = admin_client.list_topics(topic=topic, timeout=5.0)
-        
-    except KafkaException as e:
-        
-        print("[KAFKA ERROR] Error listing topics")
+    except Exception as e:
+        add_log("ERROR", f"[KAFKA ERROR] Error listing topics: {e}")
+        return 1
 
     if topic in metadata.topics:
-        
         return len(metadata.topics[topic].partitions)
-    
     else:
-        
-        raise Exception(f"Topic {topic} does not exist in the cluster")
+        add_log("ERROR", f"Topic {topic} does not exist in the cluster. Assuming 1 partition.")
+        return 1
 
 
 def _generic_kafka_consumer(bootstrap_servers: str, operator_id: int, topic: str, stop_event: threading.Event):
@@ -104,66 +105,116 @@ def _generic_kafka_consumer(bootstrap_servers: str, operator_id: int, topic: str
         tp = TopicPartition(topic=topic, partition=dest_partition)
         
         consumer.assign([tp])
+        add_log("[INFO]", f"Consumer assigned to '{topic}' [Partition: {dest_partition}]")
         
     except (Exception, KafkaException) as e:
         
-        print(f"[KAFKA ERROR] Failed creating consumer: {e}")
+        add_log("[ERROR]", f"Failed creating consumer for '{topic}': {e}")
+        return
     
-    # While FO has not exited the main program
-    while not stop_event.is_set():
+    try:
         
-        msg = consumer.poll(timeout=1.0)
-        
-        if msg is None: # There are no new messages in the kafka topic to process
-            continue
-        
-        if msg.error(): # If there is an error, the consumer does not process the message
+        # While FO has not exited the main program
+        while not stop_event.is_set():
             
-            if msg.error().code() != KafkaError._PARTITION_EOF: # This error just means that the consumer has reached the end of the partition
+            msg = consumer.poll(timeout=1.0)
+            
+            if msg is None: # There are no new messages in the kafka topic to process
+                continue
+            
+            if msg.error(): # If there is an error, the consumer does not process the message
                 
-                print(f"[KAFKA ERROR] Consumer of topic {topic}: {msg.error()}") # If it is another error, it is printed
+                if msg.error().code() != KafkaError._PARTITION_EOF: # This error just means that the consumer has reached the end of the partition
+                    
+                    print(f"[KAFKA ERROR] Consumer of topic {topic}: {msg.error()}") # If it is another error, it is printed
+                    
+                continue
+            
+            try:
                 
-            continue
-        
-        try:
-            
-            data: dict = json.loads(msg.value().decode(FORMAT))
-            
-            target_fo = data.get("operator_id")
-            
-            if target_fo == operator_id:
-            
+                data: dict = json.loads(msg.value().decode(FORMAT))
+                
+                if data.get("operator_id") != operator_id:
+                    continue
+                
+                
                 if topic == "central-notis":
                     
-                    central_notis_queue.put(data)
+                    msg_type = data.get("type")
                     
+                    match msg_type:
+                        
+                        case "RESPONSE":
+                            
+                            central_notis_queue.put(data)
+                            
+                        case "SUMMARY":
+                            
+                            _handle_summary(data.get("summary"))
+                            
+                        case "ALERT":
+                            
+                            add_log("ALERT", f"[{data.get('reason')}] {data.get('message', '')}")
+                            
+                        case "INFO":
+                            
+                            add_log("INFO", data.get("message", ""))
+                            
+                        case _:
+                            
+                            add_log("ERROR", "Unexpected error in central-notis type")
+                            
                 elif topic == "telemetry":
                     
-                    # This code section is done to extract the previous value and substitute it by the most recent one
-                    try:
-                        telemetry_queue.put_nowait(data)
+                    msg_st_id = data.get("station_id")
+                    
+                    with state_lock:
                         
-                    except queue.Full:
+                        served = fo_state["station_served"]
                         
-                        try:
+                        if served is not None and msg_st_id == served:
                             
-                            telemetry_queue.get_nowait()
-                        
-                        except queue.Empty:
+                            flux = data.get("flux_l_min", 0.0)
+                            fo_state["current_flux"] = flux
                             
-                            pass
-                        
-                        telemetry_queue.put_nowait(data)
-            else:
+                            if fo_state["irrigating"]:
+                                fo_state["accumulated_volume"] += (flux / 60.0)
+                                
+                            fo_state["last_telemetry_ts"] = time.strftime("%H:%M:%S")
+            
+            except Exception as e:
                 
-                continue
+                add_log("ERROR", f"[ERROR PARSING MESSAGE] Consumer '{topic}': {e}")
+       
+    finally:     
         
-        except Exception as e:
-            
-            print(f"[ERROR PARSING MESSAGE] Consumer of topic {topic}: {e}")
-            
-        finally:
-            
-            consumer.close()
+        consumer.close()
         
+def _handle_summary(summary: tuple):
     
+    if not summary or len(summary) < 3:
+        
+        return
+    
+    origin_station, total_time, total_liters = summary
+
+    with state_lock:
+        
+        served = fo_state["station_served"]
+        
+        if served is not None and int(origin_station) == int(served):
+            
+            avg_flux = round(total_liters / total_time, 2) if (total_time is not None and total_time > 0) else 0
+            fo_state["last_summary"] = {
+                "station_id": origin_station,
+                "total_time": total_time,
+                "total_liters": total_liters,
+                "avg_flux": avg_flux,
+                "timestamp": time.strftime("%H:%M:%S")
+            }
+            fo_state["irrigating"] = False
+            fo_state["accumulated_volume"] = 0.0
+
+    if served is not None and int(origin_station) == int(served):
+        
+        add_log("SUCCESS", f"Irrigation finished in WS-{origin_station} | {total_time} min | {total_liters} L")
