@@ -36,6 +36,26 @@ def send_and_wait_central(cmd_type: str, station_id: int | None = None, duration
                 continue
         return {"status": "TIMEOUT", "reason": "Timeout waiting for Central response (WM_Central might be down)"} # Handled error[cite: 7]
 
+def _poll_stations_loop(stop_event: threading.Event):
+    """Sends GET-STATIONS to Central every second and updates fo_state['stations']."""
+    last_ok = True
+    while not stop_event.is_set():
+        resp = send_and_wait_central("GET-STATIONS", timeout=2.0)
+
+        if resp.get("status") == "OK":
+            with state_lock:
+                fo_state["stations"] = resp.get("stations", [])
+            last_ok = True
+        elif last_ok:
+            # Only log on the OK -> failure transition to avoid flooding the log every second
+            add_log("ERROR", f"Station refresh failed: {resp.get('reason')}")
+            last_ok = False
+
+        stop_event.wait(1.0)
+
+def start_station_polling(stop_event: threading.Event):
+    threading.Thread(target=_poll_stations_loop, args=(stop_event,), daemon=True).start()
+
 @app.route("/")
 def index():
     return render_template("index.html", operator_id=app.config.get('OPERATOR_ID'))
@@ -43,7 +63,11 @@ def index():
 @app.route("/api/state", methods=["GET"])
 def api_state():
     with state_lock:
-        return jsonify(fo_state)
+        snapshot = dict(fo_state)
+        if snapshot["current_flux"] is not None:
+            snapshot["current_flux"] = round(snapshot["current_flux"], 1)
+        snapshot["accumulated_volume"] = round(snapshot["accumulated_volume"], 1)
+        return jsonify(snapshot)
 
 @app.route("/api/command", methods=["POST"])
 def api_command():
@@ -62,20 +86,23 @@ def api_command():
 
     status = resp.get("status")
     if status == "OK":
+        log_msg = None
         with state_lock:
             if cmd_type == "IRRIGATION":
                 fo_state["station_served"] = station_id
                 fo_state["irrigating"] = True
                 fo_state["accumulated_volume"] = 0.0 # Reset accumulated volume
                 dur_text = f"{duration}s" if duration else "indefinite"
-                add_log("SUCCESS", f"Irrigation started in WS-{station_id} ({dur_text})")
+                log_msg = f"Irrigation started in WS-{station_id} ({dur_text})"
             elif cmd_type in ("BLOCK", "ACTIVATE", "STOP"):
                 fo_state["station_served"] = station_id
-                if cmd_type in ("BLOCK", "STOP"): fo_state["irrigating"] = False
-                add_log("SUCCESS", f"Command {cmd_type} successful in WS-{station_id}")
-            elif cmd_type == "GET-STATIONS":
-                fo_state["stations"] = resp.get("stations", [])
-                add_log("SUCCESS", "Station list updated successfully.")
+                if cmd_type in ("BLOCK", "STOP"):
+                    fo_state["irrigating"] = False
+                log_msg = f"Command {cmd_type} successful in WS-{station_id}"
+
+        # add_log takes state_lock itself, so it must be called outside the 'with' block
+        if log_msg:
+            add_log("SUCCESS", log_msg)
     else:
         add_log("ERROR", f"Failed {cmd_type}: {resp.get('reason')}")
 
@@ -90,7 +117,10 @@ def api_batch():
     if file_path:
         commands = read_file(file_path)
     elif content:
-        commands = parse_commands_content(content)
+        try:
+            commands = parse_commands_content(content)
+        except ValueError:
+            commands = None
     else:
         commands = None
     
