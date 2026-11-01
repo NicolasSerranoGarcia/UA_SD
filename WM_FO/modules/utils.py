@@ -14,6 +14,17 @@ STATUS_STYLES = {
     "Disconnected": f"\033[100m{TEXT_WHITE}",
 }
     
+def format_duration(minutes: float | None) -> str:
+    """Formats a duration given in minutes: seconds if < 1 minute, minutes (1 decimal) otherwise."""
+    
+    if minutes is None:
+        return "-"
+    
+    if minutes < 1:
+        return f"{round(minutes * 60)} s"
+    
+    return f"{minutes:.1f} min"
+    
 def parse_commands_content(content: str) -> list:
     """Parses lines with format: <station_id>[#<duration>] and returns a list of tuples."""
     
@@ -62,7 +73,7 @@ def print_station(station: tuple):
     
     station_id, location, status = station
     
-    style = STATUS_STYLES.get(status, default="")
+    style = STATUS_STYLES.get(status, "")
     
     status_badge = f"{style} {status:<15} {RESET}" if style else f"{status:<15}"
     
