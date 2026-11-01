@@ -840,6 +840,32 @@ The screenshots show irrigation, healthy monitoring and a leak with the cloud
 Central connected. We keep the logs and deployment commands alongside these
 captures to explain the run during the practical defence.
 
+## 9.1 Timed irrigation from FO
+
+We select an Available station in FO and enter a duration in seconds. We check
+that the request is accepted and FO displays the flow readings while the station
+waters. When the time runs out, irrigation should stop automatically and FO
+should display the final duration and litres used.
+
+<!-- Add screenshot: timed irrigation in FO, showing the readings or final summary. -->
+
+## 9.2 Blocking a station from FO
+
+We send BLOCK to an Available station from FO and check the confirmation. The
+station should appear as Out of service, and a new irrigation request should be
+rejected. We then use ACTIVATE to make it available again.
+
+<!-- Add screenshot: FO's block confirmation and the station shown as Out of service. -->
+
+## 9.3 Reading requests from a file
+
+We load a text file into FO with one request per line, using `station_id#seconds`
+for timed irrigation. We check that FO sends the requests in order, waits for
+each irrigation to finish and pauses four seconds before the next one. The log
+lets us compare the requests with the file.
+
+<!-- Add screenshot: the request file and FO's log during playback. -->
+
 # 10. Source references {#sources}
 
 The project links below refer to repository snapshot `9550791`. Each entry
