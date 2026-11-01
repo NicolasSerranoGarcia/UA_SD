@@ -87,10 +87,18 @@ def process_nap_frame(client_socket: socket.socket, fields: list) -> tuple[bool,
             
             if db.check_station(station_id):
                 
-                db.set_station_status(station_id, status="Available")
+                if (db.get_station_status(station_id) == "Disconnected") and (db.get_station_previous_status(station_id) == "Out of service"):
+                    
+                    next_status = "Out of service"
+                    
+                else:
+                    
+                    next_status = "Available"
+                
+                db.set_station_status(station_id, next_status)
                 send_nap_msg(client_socket, f"NAP#1.0#{ack_code}#3#{station_id}")
                 print(f"[NAP] Station {station_id} available and ready for irrigation.")
-                st.log(f"WS-{station_id} activated and available") 
+                st.log(f"WS-{station_id} connected. Status: {next_status}") 
                 
             else:
                 
