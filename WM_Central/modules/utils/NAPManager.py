@@ -120,7 +120,7 @@ def process_nap_frame(client_socket: socket.socket, fields: list) -> tuple[bool,
                     
                     if current_status != "Leak":
                         
-                        if current_status != "Disconnected":
+                        if current_status != "Disconnected": # Security measure
                         
                             db.set_station_previous_status(station_id, current_status or "Available")
                         
