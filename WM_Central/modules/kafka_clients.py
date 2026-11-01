@@ -9,10 +9,11 @@ FORMAT = "utf-8"
 
 _producer: Producer | None = None
 _stop_event: threading.Event | None = None    
+_central_notis_partitions = 0
 
 def start_kafka(bootstrap_servers: str, stop_event: threading.Event, topic_handlers: dict):
     
-    global _producer, _stop_event
+    global _producer, _stop_event, _central_notis_partitions
     
     _stop_event = stop_event
     
@@ -25,6 +26,16 @@ def start_kafka(bootstrap_servers: str, stop_event: threading.Event, topic_handl
         }
         
         _producer = Producer(kafka_config)
+        
+        # Get the number of partitions of central-notis
+        admin = AdminClient({"bootstrap.servers": bootstrap_servers})
+        metadata = admin.list_topics(topic="central-notis", timeout=5.0)
+        topic_metadata = metadata.topics.get("central-notis")
+
+        if topic_metadata is None or not topic_metadata.partitions:
+            raise RuntimeError("Kafka topic 'central-notis' does not exist or has no partitions")
+
+        _central_notis_partitions = len(topic_metadata.partitions)
         
     except KafkaException as e:
         
@@ -117,12 +128,34 @@ def send_event(topic: str, msg: dict, key: str | int | None = None):
         msg_bytes = json.dumps(msg).encode(FORMAT)
         key_bytes = str(key).encode(FORMAT) if key is not None else None
         
-        _producer.produce(topic=topic, value=msg_bytes, key=key_bytes)
+        if topic == "central-notis":
+            
+            if key is None:
+                raise ValueError("Messages to 'central-notis' must include an operator ID key")
+
+            operator_id = int(key)
+            if operator_id < 0:
+                
+                raise ValueError("Operator ID cannot be negative")
+
+            partition = operator_id % _central_notis_partitions
+            _producer.produce(
+                topic=topic,
+                partition=partition,
+                value=msg_bytes,
+                key=key_bytes,
+            )
+            
+        else:
+                
+            _producer.produce(topic=topic, value=msg_bytes, key=key_bytes)
+        
+        
         _producer.poll(0)
         
     except Exception as e:
         
-        print(f"[KAFKA ERROR] Producer unable to send message to {topic}: {e}")
+        st.log(f"[KAFKA ERROR] Producer unable to send message to {topic}: {e}")
     
 def stop_kafka():
     """Function that clears all the pending messages before exiting the program"""
