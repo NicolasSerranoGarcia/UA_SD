@@ -14,44 +14,49 @@ STATUS_STYLES = {
     "Disconnected": f"\033[100m{TEXT_WHITE}",
 }
     
+def parse_commands_content(content: str) -> list:
+    """Parses lines with format: <station_id>[#<duration>] and returns a list of tuples."""
+    
+    commands = []
+    
+    for line in content.splitlines():
+        
+        command = line.strip()
+        
+        if not command:
+            
+            continue
+        
+        parts = command.split("#")
+        
+        if len(parts) >= 2:
+            
+            commands.append((int(parts[0].strip()), int(parts[1].strip())))
+            
+        else:
+            
+            
+            commands.append((int(parts[0].strip()), None))
+            
+    return commands
 
-def read_file(file_path: str, format: str = 'utf-8') -> list:
-    """Function that reads a file with commands with format: <station_id>[#<duration>]"""
+def read_file(file_path: str, format: str = 'utf-8') -> list | None:
     
     try:
         
         with open(file_path, mode="r", encoding=format) as file:
             
-            raw_lines = file.readlines()
-            commands = []
-            for line in raw_lines:
-                
-                command = line.strip()
-                
-                if not command:
-                    continue
-                
-                command = command.split("#")
-                
-                if len(command) >= 2:
-                    command[0] = int(command[0])
-                    command[1] = int(command[1])
-                    commands.append(tuple(command))
-                
-                else:
-                    commands.append(int(command[0]), None)
-                
-                
+            return parse_commands_content(file.read())
+        
     except OSError:
         
-        add_log(f"ERROR", f"File '{file_path}' does not exists. Try again")
+        print(f"[ERROR] File '{file_path}' does not exist.")
         return None
-            
+    
     except ValueError:
-        add_log(f"ERROR", f"Invalid format inside '{file_path}'.")
-        return None      
-            
-    return commands
+        
+        print(f"[ERROR] Invalid format inside '{file_path}'.")
+        return None
 
 def print_station(station: tuple):
     
