@@ -1,6 +1,6 @@
-import time
 import os
 import subprocess
+from modules.shared.shared_status import add_log
 
 RESET = "\033[0m"
 TEXT_BLACK = "\033[30m"
@@ -13,41 +13,6 @@ STATUS_STYLES = {
     "Out of service": f"\033[48;5;208m{TEXT_BLACK}",
     "Disconnected": f"\033[100m{TEXT_WHITE}",
 }
-
-def print_menu():
-    """Procedure that prints the menu"""
-    
-    print("1.Start Irrigation")
-    print("2.Block station")
-    print("3.Activate station")
-    print("4.Show stations")
-    print("5.Read requests from file")
-    print("6.Exit")
-
-def flush_cmd():
-    """Procedure that clears the terminal"""
-    
-    command = "clear" if os.name != "nt" else "cls"
-    subprocess.run(command, shell=True)
-
-def ask_int(cmd_msg: str, error_msg: str, default: int | None = None) -> int | None:
-    """Function that asks for an int in the terminal and returns the int if the input is correct, None
-    if the input is 'q' to exit. This is done until the input is correct"""
-    
-    while True:
-        
-        introduced_value = input(cmd_msg).strip()
-        
-        if introduced_value.lower() == "q":
-            return None
-        
-        if not introduced_value and default is not None:
-            return default
-        
-        if introduced_value.isdigit():
-            return int(introduced_value)
-        
-        print(error_msg)
     
 
 def read_file(file_path: str, format: str = 'utf-8') -> list:
@@ -74,14 +39,17 @@ def read_file(file_path: str, format: str = 'utf-8') -> list:
                     commands.append(tuple(command))
                 
                 else:
-                    commands.append(int(command[0]))
+                    commands.append(int(command[0]), None)
                 
                 
     except OSError:
         
-        print(f"[ERROR] File '{file_path}' does not exists. Try again")
+        add_log(f"[ERROR]", f"File '{file_path}' does not exists. Try again")
         return None
-                  
+            
+    except ValueError:
+        add_log(f"[ERROR]", f"Invalid format inside '{file_path}'.")
+        return None      
             
     return commands
 
