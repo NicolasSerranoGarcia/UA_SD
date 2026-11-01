@@ -73,8 +73,8 @@
 
             <h3 style="margin-top:20px;">Batches</h3>
             <div class="form-group">
-                <input type="text" id="file_path" placeholder="Path to commands.txt">
-                <button onclick="runFile()">Execute Path</button>
+                <input type="file" id="batch_file" accept=".txt">
+                <button onclick="runFile()">Execute File</button>
             </div>
             <div class="form-group">
                 <textarea id="batch_text" rows="2" placeholder="Or paste lines (e.g., 1#60 or 1 for indef)"></textarea>
@@ -158,13 +158,28 @@
                 alert("Impossible to connect with WM_Central"); // Error handling[cite: 7]
             }
         }
+        async function postBatch(content) {
+            try {
+                const res = await fetch('/api/batch', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({content})
+                });
+                if (!res.ok) alert('Invalid batch format. Expected one line per command: station_id[#duration]');
+                updateDashboard();
+            } catch (e) {
+                alert("Impossible to connect with WM_FO backend");
+            }
+        }
         async function runFile() {
-            const path = document.getElementById('file_path').value;
-            if (path) await fetch('/api/batch', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({file_path: path}) });
+            const file = document.getElementById('batch_file').files[0];
+            if (!file) return alert('Select a file first.');
+            const content = (await file.text()).trim();
+            if (content) await postBatch(content);
         }
         async function runBatchText() {
             const content = document.getElementById('batch_text').value.trim();
-            if (content) await fetch('/api/batch', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({content}) });
+            if (content) await postBatch(content);
         }
         setInterval(updateDashboard, 1000); updateDashboard();
     </script>

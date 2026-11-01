@@ -108,6 +108,26 @@ def api_command():
 
     return jsonify(resp)
 
+def _wait_irrigation_end(st_id: int, duration: int | None):
+    """Blocks until the irrigation in st_id has finished (summary received, STOP or BLOCK)."""
+    # With a known duration, a safety margin prevents the batch from hanging if the summary never arrives
+    deadline = time.time() + duration + 15 if duration else None
+
+    while True:
+        with state_lock:
+            still_irrigating = fo_state["irrigating"] and fo_state["station_served"] == st_id
+
+        if not still_irrigating:
+            return
+
+        if deadline and time.time() > deadline:
+            add_log("ERROR", f"[Batch] No end-of-irrigation summary received from WS-{st_id}. Continuing.")
+            with state_lock:
+                fo_state["irrigating"] = False
+            return
+
+        time.sleep(0.5)
+
 @app.route("/api/batch", methods=["POST"])
 def api_batch():
     body = request.json or {}
@@ -129,8 +149,9 @@ def api_batch():
         return jsonify({"status": "KO"}), 400
 
     def _run_batch_bg(cmd_list):
-        for st_id, dur in cmd_list:
+        for i, (st_id, dur) in enumerate(cmd_list):
             resp = send_and_wait_central("IRRIGATION", station_id=st_id, duration=dur)
+
             if resp.get("status") == "OK":
                 with state_lock:
                     fo_state["station_served"] = st_id
@@ -138,9 +159,15 @@ def api_batch():
                     fo_state["accumulated_volume"] = 0.0
                 dur_text = f"{dur}s" if dur else "indefinite"
                 add_log("SUCCESS", f"[Batch] WS-{st_id} irrigating ({dur_text}).")
-            else:
-                add_log("ERROR", f"[Batch] Failed in WS-{st_id}. Reason: {resp.get('reason')}") # Added reason
-            time.sleep(2)
 
+                _wait_irrigation_end(st_id, dur)
+            else:
+                add_log("ERROR", f"[Batch] Failed in WS-{st_id}. Reason: {resp.get('reason')}")
+
+            if i < len(cmd_list) - 1:
+                add_log("INFO", "[Batch] Next order in 4 s...")
+                time.sleep(4)
+
+        add_log("INFO", "[Batch] Finished.")
     threading.Thread(target=_run_batch_bg, args=(commands,), daemon=True).start()
     return jsonify({"status": "OK"})
