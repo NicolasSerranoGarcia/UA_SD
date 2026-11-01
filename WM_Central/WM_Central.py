@@ -412,7 +412,7 @@ def ws_finish_conf_handler(data: dict):
         
             db.set_station_status(station_id, "Available")
             
-        st.log(f"[IRRIGATION FINISHED] WS-{station_id} finished: {total_liters} L in {total_time} min. Average flux: {total_liters/total_time} L/min")
+        st.log(f"[IRRIGATION FINISHED] WS-{station_id} finished: {total_liters:.2f} L in {total_time:.2f} min. Average flux: {total_liters/total_time:.2f} L/min")
         
         operator_id = data.get("operator_id") or db.get_station_serving_operator(station_id)
         db.set_station_serving_operator(station_id, None)
