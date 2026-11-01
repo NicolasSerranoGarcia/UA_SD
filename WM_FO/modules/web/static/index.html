@@ -82,10 +82,7 @@
             </div>
         </div>
         <div class="card">
-            <div style="display:flex; justify-content:space-between;">
-                <h3>Stations</h3>
-                <button onclick="refreshStations()">GET-STATIONS</button>
-            </div>
+            <h3>Stations</h3>
             <table>
                 <thead><tr><th>ID</th><th>Location</th><th>Status</th><th>Action</th></tr></thead>
                 <tbody id="stations-tbody"></tbody>
@@ -96,6 +93,11 @@
     </div>
     <script>
         const opId = document.getElementById('op_id').innerText;
+
+        function fmt(value, decimals) {
+            const n = Number(value);
+            return Number.isFinite(n) ? n.toFixed(decimals) : '--';
+        }
 
         async function updateDashboard() {
             try {
@@ -111,17 +113,17 @@
                     // Show Operator ID during watering[cite: 6]
                     document.getElementById('tele-operator').textContent = state.irrigating ? `Operator: FO-${opId}` : '';
                     
-                    document.getElementById('tele-flux').textContent = state.current_flux !== null ? `${state.current_flux} L/min` : '0.0 L/min';
+                    document.getElementById('tele-flux').textContent = `${fmt(state.current_flux ?? 0, 1)} L/min`;
                     
                     // Show Accumulated Volume[cite: 6]
-                    document.getElementById('tele-volume').textContent = state.irrigating ? `Acc. Vol: ${state.accumulated_volume.toFixed(2)} L` : '';
+                    document.getElementById('tele-volume').textContent = state.irrigating ? `Acc. Vol: ${fmt(state.accumulated_volume, 1)} L` : '';
 
                     document.getElementById('tele-time').textContent = state.last_telemetry_ts || 'Waiting...';
                 }
                 if (state.last_summary) {
                     const s = state.last_summary;
                     document.getElementById('summary-container').style.display = 'block';
-                    document.getElementById('summary-text').innerHTML = `WS-${s.station_id} | ${s.total_time}m | ${s.total_liters}L | ${s.avg_flux}L/m`;
+                    document.getElementById('summary-text').innerHTML = `WS-${s.station_id} | Time: ${s.total_time_label} | Liters: ${s.total_liters}L | Avg Flux: ${s.avg_flux}L/min`;
                 }
                 if (state.stations.length > 0) {
                     document.getElementById('stations-tbody').innerHTML = state.stations.map(st => {
@@ -147,7 +149,7 @@
             const station_id = parseInt(document.getElementById('station_id').value);
             const dur_val = document.getElementById('duration').value;
             const duration = dur_val ? parseInt(dur_val) : null;
-            if (type !== 'GET-STATIONS' && !station_id) return alert('Enter an ID.');
+            if (!station_id) return alert('Enter an ID.');
             
             try {
                 await fetch('/api/command', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type, station_id, duration}) });
@@ -156,7 +158,6 @@
                 alert("Impossible to connect with WM_Central"); // Error handling[cite: 7]
             }
         }
-        function refreshStations() { sendAction('GET-STATIONS'); }
         async function runFile() {
             const path = document.getElementById('file_path').value;
             if (path) await fetch('/api/batch', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({file_path: path}) });
