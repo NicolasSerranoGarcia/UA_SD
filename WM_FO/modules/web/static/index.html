@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>WM_FO - Operador #{{ operator_id }}</title>
+    <style>
+        :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --muted: #94a3b8; --primary: #3b82f6; --success: #22c55e; --danger: #ef4444; --warning: #f59e0b; }
+        * { box-sizing: border-box; font-family: system-ui, sans-serif; }
+        body { margin: 0; padding: 20px; background: var(--bg); color: var(--text); }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 10px; margin-bottom: 20px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .card { background: var(--card); padding: 20px; border-radius: 8px; border: 1px solid #334155; }
+        .flux-val { font-size: 2.5rem; font-weight: bold; color: #38bdf8; margin: 10px 0; text-align: center; }
+        .badge { padding: 4px 10px; border-radius: 999px; font-size: 0.85rem; font-weight: 600; display: inline-block; }
+        .st-Available { background: #166534; color: #dcfce7; } .st-Watering { background: #0284c7; color: #e0f2fe; }
+        .st-Leak { background: #991b1b; color: #fee2e2; } .st-Out { background: #9a3412; color: #ffedd5; } .st-Disconnected { background: #475569; color: #f1f5f9; }
+        .form-group { display: flex; gap: 8px; margin-bottom: 12px; }
+        input, textarea { background: #0f172a; border: 1px solid #475569; color: white; padding: 8px; border-radius: 4px; width: 100%; }
+        button { background: var(--primary); color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-weight: 600; }
+        button.btn-danger { background: var(--danger); } button.btn-success { background: var(--success); } button.btn-warning { background: var(--warning); color: black; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; } th, td { text-align: left; padding: 8px; border-bottom: 1px solid #334155; }
+        .log-box { max-height: 250px; overflow-y: auto; background: #0f172a; padding: 10px; font-family: monospace; font-size: 0.9rem; }
+        .log-SUCCESS { color: #4ade80; } .log-ERROR { color: #f87171; } .log-INFO { color: #93c5fd; } .log-ALERT { color: #facc15; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div><h2 style="margin:0;">Operador de Campo #{{ operator_id }}</h2></div>
+        <div id="served-indicator" class="badge st-Disconnected">Sin asignar</div>
+    </div>
+    <div class="grid">
+        <div class="card">
+            <h3>Telemetría en Vivo</h3>
+            <div style="text-align:center; padding:15px; background:#0f172a; border:1px solid #3b82f6; border-radius:6px; margin-bottom:15px;">
+                <div id="tele-station" style="color:var(--muted);">Ninguna estación</div>
+                <div id="tele-flux" class="flux-val">-- L/min</div>
+                <div id="tele-time" style="color:var(--muted); font-size:0.8rem;">Esperando datos...</div>
+            </div>
+            <div id="summary-container" style="display:none; background:#064e3b; padding:10px; border-radius:6px; margin-bottom:15px;">
+                <strong>Último Resumen:</strong> <span id="summary-text"></span>
+            </div>
+            
+            <h3>Acciones</h3>
+            <div class="form-group">
+                <input type="number" id="station_id" placeholder="ID Estación" min="1">
+                <input type="number" id="duration" placeholder="Duración(s) (vacío=indef)" min="1">
+                <button class="btn-success" onclick="sendAction('IRRIGATION')">Regar</button>
+            </div>
+            <div class="form-group">
+                <button class="btn-danger" style="width:33%" onclick="sendAction('BLOCK')">Bloquear</button>
+                <button class="btn-warning" style="width:33%" onclick="sendAction('ACTIVATE')">Activar</button>
+                <button class="btn-danger" style="width:33%; background:#7f1d1d;" onclick="sendAction('STOP')">Detener</button>
+            </div>
+
+            <h3 style="margin-top:20px;">Lotes</h3>
+            <div class="form-group">
+                <input type="text" id="file_path" placeholder="Ruta commands.txt">
+                <button onclick="runFile()">Ejecutar Ruta</button>
+            </div>
+            <div class="form-group">
+                <textarea id="batch_text" rows="2" placeholder="O pega líneas (ej. 1#60 o 1 para indef)"></textarea>
+                <button onclick="runBatchText()">Enviar Lote</button>
+            </div>
+        </div>
+        <div class="card">
+            <div style="display:flex; justify-content:space-between;">
+                <h3>Estaciones</h3>
+                <button onclick="refreshStations()">GET-STATIONS</button>
+            </div>
+            <table>
+                <thead><tr><th>ID</th><th>Ubicación</th><th>Estado</th><th>Acción</th></tr></thead>
+                <tbody id="stations-tbody"></tbody>
+            </table>
+            <h3 style="margin-top:20px;">Logs</h3>
+            <div class="log-box" id="logs-box"></div>
+        </div>
+    </div>
+    <script>
+        async function updateDashboard() {
+            const res = await fetch('/api/state');
+            const state = await res.json();
+            
+            const badge = document.getElementById('served-indicator');
+            if (state.station_served !== null) {
+                badge.textContent = `WS-${state.station_served}` + (state.irrigating ? ' (Regando)' : '');
+                badge.className = 'badge ' + (state.irrigating ? 'st-Watering' : 'st-Available');
+                document.getElementById('tele-station').textContent = `WS-${state.station_served}`;
+                document.getElementById('tele-flux').textContent = state.current_flux !== null ? `${state.current_flux} L/min` : '0.0 L/min';
+                document.getElementById('tele-time').textContent = state.last_telemetry_ts || 'Esperando...';
+            }
+            if (state.last_summary) {
+                const s = state.last_summary;
+                document.getElementById('summary-container').style.display = 'block';
+                document.getElementById('summary-text').innerHTML = `WS-${s.station_id} | ${s.total_time}m | ${s.total_liters}L | ${s.avg_flux}L/m`;
+            }
+            if (state.stations.length > 0) {
+                document.getElementById('stations-tbody').innerHTML = state.stations.map(st => 
+                    `<tr><td>WS-${st[0]}</td><td>${st[1]}</td><td><span class="badge st-${String(st[2]).split(' ')[0]}">${st[2]}</span></td>
+                    <td><button onclick="document.getElementById('station_id').value=${st[0]}">Sel</button></td></tr>`
+                ).join('');
+            }
+            document.getElementById('logs-box').innerHTML = state.logs.map(l => `<div class="log-${l.level}">[${l.time}] ${l.message}</div>`).join('');
+        }
+        async function sendAction(type) {
+            const station_id = parseInt(document.getElementById('station_id').value);
+            const dur_val = document.getElementById('duration').value;
+            const duration = dur_val ? parseInt(dur_val) : null;
+            if (type !== 'GET-STATIONS' && !station_id) return alert('Introduce un ID.');
+            await fetch('/api/command', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type, station_id, duration}) });
+            updateDashboard();
+        }
+        function refreshStations() { sendAction('GET-STATIONS'); }
+        async function runFile() {
+            const path = document.getElementById('file_path').value;
+            if (path) await fetch('/api/batch', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({file_path: path}) });
+        }
+        async function runBatchText() {
+            const content = document.getElementById('batch_text').value.trim();
+            if (content) await fetch('/api/batch', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({content}) });
+        }
+        setInterval(updateDashboard, 1000); updateDashboard();
+    </script>
+</body>
+</html>
