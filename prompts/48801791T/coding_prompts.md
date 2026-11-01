@@ -68,3 +68,7 @@ py .\WM_Central\clienteprueba.py localhost 8080 NAP#<protocol-version>#<ack-code
 ---
 
 ### *Give me a function that calculates the accumulated volume taking as an input the flux sent by an station*
+
+---
+
+### *Implement a graphical interface for the field operator's application. Keep in mind that the operator can only view telemetry for the specific station they are currently servicing. Include buttons to lock, stop, or activate the station, as well as a button to upload a .txt file containing the commands.*
