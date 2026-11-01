@@ -44,11 +44,11 @@ def read_file(file_path: str, format: str = 'utf-8') -> list:
                 
     except OSError:
         
-        add_log(f"[ERROR]", f"File '{file_path}' does not exists. Try again")
+        add_log(f"ERROR", f"File '{file_path}' does not exists. Try again")
         return None
             
     except ValueError:
-        add_log(f"[ERROR]", f"Invalid format inside '{file_path}'.")
+        add_log(f"ERROR", f"Invalid format inside '{file_path}'.")
         return None      
             
     return commands

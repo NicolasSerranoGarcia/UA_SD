@@ -33,11 +33,11 @@ def main():
         start_consumers(f"{args.kafka_ip}:{args.kafka_port}", operator_id, stop_event)
         
     except KafkaException as e:
-        add_log("[ERROR]", f"Kafka init error: {e}")
+        add_log("ERROR", f"Kafka init error: {e}")
 
     try:
         
-        add_log("[INFO]", f"Web UI (FO #{operator_id}) -> http://localhost:{web_port}")
+        add_log("INFO", f"Web UI (FO #{operator_id}) -> http://localhost:{web_port}")
         app.run(host="0.0.0.0", port=web_port, debug=False, use_reloader=False)
         
     finally:
