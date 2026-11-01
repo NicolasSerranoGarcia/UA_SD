@@ -50,6 +50,7 @@
   .detail-status{margin:.75rem;padding:.6rem;text-align:center;border-radius:4px;font-weight:700;color:#fff}
   #log{font:12px/1.5 ui-monospace,Consolas,monospace;background:#101820;color:#d8e1e8;padding:.6rem .75rem;height:200px;overflow:auto;border-radius:0 0 6px 6px}
   #log div.l{color:#ff9d9d} #log div.o{color:#ffd28a}
+  #log div.l{color:#ff9d9d} #log div.o{color:#ffd28a} #log div.g{color:#7ee2a1}
   .wide{grid-column:1/-1}
   #statusbar{margin-top:.75rem;font-size:.8rem;color:#556;display:flex;justify-content:space-between;flex-wrap:wrap;gap:.5rem}
   #flash{font-weight:600}
@@ -242,7 +243,10 @@ function renderLog(events){
   const box = $("log");
   const atTop = box.scrollTop < 5;
   box.innerHTML = events.map(line => {
-    const cls = /leak|disconnected|error|KO|denied/i.test(line) ? "l" : /out of service|block/i.test(line) ? "o" : "";
+    let cls = "";
+    if(/enrolled|activated|recovered|irrigation started|irrigation finished|started irrigating/i.test(line)) cls = "g";
+    else if(/leak|disconnected|connection lost|error|\bKO\b|denied/i.test(line)) cls = "l";
+    else if(/out of service|block/i.test(line)) cls = "o";
     return `<div class="${cls}">${esc(line)}</div>`;
   }).join("");
   if(atTop) box.scrollTop = 0;
