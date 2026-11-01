@@ -420,7 +420,7 @@ def ws_finish_conf_handler(data: dict):
         if operator_id is not None: # Send the operator the summary
             
             target_topic = "central-notis"
-            summary = (station_id, total_time, total_liters)
+            summary = (station_id, round(total_time, 2), round(total_liters, 2))
             
             msg = {
                 "operator_id": operator_id,
