@@ -7,7 +7,6 @@ from modules.utils import read_file, parse_commands_content
 from modules.kafka_clients import send_command
 from modules.shared.shared_status import fo_state, state_lock, central_notis_queue, add_log
 
-DEFAULT_DURATION = 120
 cmd_lock = threading.Lock() 
 
 app = Flask(__name__, template_folder="static")
