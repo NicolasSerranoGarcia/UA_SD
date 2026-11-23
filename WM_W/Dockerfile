@@ -3,7 +3,7 @@ FROM gcc:14
 WORKDIR /opt/wm-w
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates cmake libboost-program-options-dev libboost-url-dev libboost-json-dev \
+    ca-certificates cmake libboost-program-options-dev libboost-url-dev libboost-json-dev libcurl4-openssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY CMakeLists.txt CmakeOptions.txt ./

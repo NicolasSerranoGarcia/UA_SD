@@ -4,6 +4,7 @@ project(weather_control_office LANGUAGES CXX)
 
 include(CmakeOptions.txt)
 include(cmake/boost.cmake)
+find_package(CURL 7.85 REQUIRED)
 
 add_subdirectory(src)
 
