@@ -4,6 +4,8 @@ Run from the repository root in Bash. Use a C++23 compiler and CMake 3.21+.
 On Windows, add `.exe` to executable paths; some generators also add `Release/`.
 Use a separate terminal for each Engine and Monitor command.
 
+For the Release 2 enrollment menu, see [WM_Registry deployment and Monitor commands](../WM_Registry/BUILDING.md). Monitor uses the Railway Registry by default. The existing Engine and Monitor commands below select NAP monitoring through their Central settings.
+
 ## 1. Build and run from source
 
 ### Build Engine
@@ -192,12 +194,14 @@ docker network rm wm-network
 docker volume rm wm-engine-state-1 wm-station-logs-1
 ```
 
-### Delete Compose station data and logs — after deleting its containers
+### Delete Compose station data, logs, and Registry credentials
 
 ```sh
 docker compose -f WM_WS/compose.yaml -p ws-1 down --volumes --remove-orphans
 docker compose -f WM_WS/compose.yaml -p ws-2 down --volumes --remove-orphans
 ```
+
+If the station is still registered after removing the credential volume, reset its enrollment in Registry before registering again.
 
 ### Reset native build directories
 
