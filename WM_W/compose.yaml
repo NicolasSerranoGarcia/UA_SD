@@ -1,0 +1,7 @@
+services:
+  weather:
+    build:
+      context: .
+    env_file: .env
+    volumes:
+      - ./config:/etc/wm-w:ro

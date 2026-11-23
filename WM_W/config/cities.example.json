@@ -1,0 +1,11 @@
+{
+  "cities": {
+    "alicante": {
+      "latitude": 38.3452,
+      "longitude": -0.4810
+    }
+  },
+  "stations": {
+    "1": "alicante"
+  }
+}
