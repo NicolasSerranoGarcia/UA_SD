@@ -2,7 +2,7 @@ FROM gcc:14
 
 WORKDIR /usr/src/water_management_app/watering_station/monitor
 
-RUN apt-get update && apt-get install -y --no-install-recommends cmake git ca-certificates qt6-base-dev qt6-base-dev-tools libboost-program-options-dev libboost-url-dev\
+RUN apt-get update && apt-get install -y --no-install-recommends cmake git ca-certificates qt6-base-dev qt6-base-dev-tools libboost-program-options-dev libboost-url-dev libboost-json-dev libcurl4-openssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Build with WM_WS as the context so the shared HCP header is available.

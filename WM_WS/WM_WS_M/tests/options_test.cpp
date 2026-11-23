@@ -47,11 +47,25 @@ TEST(MonitorOptions, ParsesOwnedConfigurationAndDefaultsWithoutDns) {
     EXPECT_EQ(options.napInterval, std::chrono::milliseconds{1000});
     EXPECT_EQ(options.napTimeout, std::chrono::milliseconds{2000});
     EXPECT_EQ(options.logFile, "log/wm-ws-monitor.log");
+    EXPECT_TRUE(options.registryUrl.empty());
 }
 
 TEST(MonitorOptions, RejectsMissingRequiredOptions) {
     std::ostringstream output;
     EXPECT_FALSE(parse({"WM_WS_M"}, output).has_value());
+}
+
+TEST(MonitorOptions, RegistryModeOnlyNeedsAStationAndVerifiedHttpsEndpoint) {
+    std::ostringstream output;
+    const auto defaults = parse({"WM_WS_M", "--ws-id", "1"}, output);
+    ASSERT_TRUE(defaults && *defaults);
+    EXPECT_EQ((**defaults).registryUrl, "https://uasd-production-752a45b0.up.railway.app");
+    const auto result = parse({"WM_WS_M", "--ws-id", "1", "--registry-url", "https://localhost:8443",
+                               "--registry-ca-file", "lab-ca.pem"}, output);
+    ASSERT_TRUE(result && *result);
+    EXPECT_EQ((**result).registryUrl, "https://localhost:8443");
+    EXPECT_FALSE(parse({"WM_WS_M", "--ws-id", "1", "--registry-url", "http://localhost:8443"}, output));
+    EXPECT_FALSE(parse({"WM_WS_M", "--ws-id", "01", "--registry-url", "https://localhost:8443"}, output));
 }
 
 TEST(MonitorOptions, AcceptsEngineHostnameWithoutResolvingDuringParsing) {

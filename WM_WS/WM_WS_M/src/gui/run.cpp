@@ -2,6 +2,7 @@
 #include "logging.hpp"
 
 #include "app/app.hpp"
+#include "gui/enrollment.hpp"
 #include "gui/window.hpp"
 #include <QApplication>
 #include <QMetaObject>
@@ -14,6 +15,8 @@ namespace gui {
 
 int run(int argc, char *argv[], const app::Options &options) {
     QApplication application(argc, argv);
+    if (!options.registryUrl.empty())
+        return runEnrollmentDialog(options);
     Window window(options);
     int result = 0;
     std::jthread worker([&](std::stop_token stop) {

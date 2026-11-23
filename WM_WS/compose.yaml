@@ -26,9 +26,11 @@ services:
       LOG_FILE: /var/log/wm-ws/wm-ws-monitor.log
     volumes:
       - station-logs:/var/log/wm-ws
+      - registry-credentials:/var/lib/wm-ws/registry
     stdin_open: true
     tty: true
 
 volumes:
   engine-state:
   station-logs:
+  registry-credentials:

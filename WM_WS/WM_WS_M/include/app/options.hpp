@@ -22,6 +22,9 @@ struct Options {
     std::chrono::milliseconds napTimeout;
     std::string logFile = "log/wm-ws-monitor.log";
     std::string engineHostname;
+    std::string registryUrl;
+    std::string registryCaFile;
+    std::string registryStateDir = "state/registry";
 };
 
 // An empty optional means --help was printed; an unexpected value is a CLI error.

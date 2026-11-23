@@ -2,6 +2,7 @@
 
 #include "console.hpp"
 #include "logging.hpp"
+#include "registry/enrollment.hpp"
 #include <atomic>
 #include <iostream>
 #include <mutex>
@@ -11,6 +12,38 @@
 
 namespace app {
 namespace {
+
+int runEnrollment(const Options &options) {
+    const registry::Enrollment enrollment(options);
+    console::Input input(console::inputEcho());
+    auto message = enrollment.perform(registry::Action::Verify);
+    for (;;) {
+        std::cout << "\nStation " << options.wsId << " | " << options.location << '\n' << message
+                  << "\n[R] Register  [D] Deregister  [P] Refresh status  [Q] Quit\n> " << std::flush;
+        for (;;) {
+            const auto command = input.read(std::chrono::milliseconds{100});
+            if (!command)
+                return 1;
+            if (command->kind == console::Kind::Closed)
+                return 0;
+            if (command->kind == console::Kind::Waiting)
+                continue;
+            const auto &key = command->text;
+            if (key == "q" || key == "quit")
+                return 0;
+            if (key == "r" || key == "register") {
+                message = enrollment.perform(registry::Action::Register);
+            } else if (key == "d" || key == "deregister") {
+                message = enrollment.perform(registry::Action::Deregister);
+            } else if (key == "p" || key == "status") {
+                message = enrollment.perform(registry::Action::Verify);
+            } else {
+                message = "Choose Register, Deregister, Refresh status, or Quit.";
+            }
+            break;
+        }
+    }
+}
 
 std::string_view phaseName(Phase phase) {
     switch (phase) {
@@ -59,6 +92,8 @@ void show(const Options &options, const Status &status) {
 } // namespace
 
 int runTerminal(const Options &options) {
+    if (!options.registryUrl.empty())
+        return runEnrollment(options);
     std::mutex mutex;
     Status latest;
     std::atomic<bool> finished = false;

@@ -7,7 +7,7 @@ target_include_directories(monitor_options_test PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../../shared"
 )
 target_link_libraries(monitor_options_test PRIVATE
-  GTest::gtest_main Boost::program_options ninttp::ninttp
+  GTest::gtest_main Boost::program_options Boost::url ninttp::ninttp
 )
 gtest_discover_tests(monitor_options_test PROPERTIES TIMEOUT 10)
 
@@ -28,6 +28,8 @@ target_link_libraries(monitor_reporter_test PRIVATE wm_ws_monitor GTest::gtest_m
 gtest_discover_tests(monitor_reporter_test PROPERTIES TIMEOUT 10)
 
 if(BUILD_GUI)
+  add_executable(monitor_registry_gui_driver registry_gui_driver.cpp)
+  target_link_libraries(monitor_registry_gui_driver PRIVATE wm_ws_monitor_gui)
   add_executable(monitor_window_test window_test.cpp)
   target_link_libraries(monitor_window_test PRIVATE wm_ws_monitor_gui GTest::gtest)
   gtest_discover_tests(monitor_window_test PROPERTIES TIMEOUT 10
