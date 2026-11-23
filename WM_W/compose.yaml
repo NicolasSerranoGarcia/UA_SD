@@ -3,5 +3,7 @@ services:
     build:
       context: .
     env_file: .env
+    ports:
+      - "${WM_W_HOST_PORT:-8080}:${WM_W_PORT:-8080}"
     volumes:
       - ./config:/etc/wm-w:ro
