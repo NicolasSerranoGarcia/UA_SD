@@ -259,7 +259,7 @@ TEST_P(CentralOutageState, RecoversWithoutRestartingWs) {
     ts::Process monitor(ts::monitorPath, arguments);
     {
         auto registration = central->accept();
-        ASSERT_NE(ts::receiveFrame(registration).find("#0#1#spain#"), std::string::npos);
+        ASSERT_NE(ts::receiveFrame(registration).find("#0#1#alicante#"), std::string::npos);
         acknowledgeNap(registration, 1, "1");
     }
     {
@@ -406,7 +406,7 @@ TEST_P(RegistrationResponse, MonitorActivatesOnNewConnectionAndReportsEngineHeal
     ts::Process monitor(ts::monitorPath, ts::monitorArguments(central.port(), engine.port()));
     {
         auto registration = central.accept();
-        ASSERT_EQ(ts::receiveFrame(registration), "NAP#1.0#1#0#station-1#spain#51#FIN");
+        ASSERT_EQ(ts::receiveFrame(registration), "NAP#1.0#1#0#station-1#alicante#2D#FIN");
         ts::send(registration, GetParam());
     } // Central closes the registration connection after replying.
     {
@@ -437,7 +437,7 @@ TEST(Process, LeakKeepsNapOpenAndRepairRestoresHealthyReports) {
     ts::Process monitor(ts::monitorPath, ts::monitorArguments(central.port(), engine.port()));
     {
         auto registration = central.accept();
-        ASSERT_EQ(ts::receiveFrame(registration), "NAP#1.0#1#0#station-1#spain#51#FIN");
+        ASSERT_EQ(ts::receiveFrame(registration), "NAP#1.0#1#0#station-1#alicante#2D#FIN");
         acknowledgeNap(registration, 1);
     }
     {
@@ -491,7 +491,7 @@ TEST_P(ReservedZeroResponse, CannotAuthorizeActivation) {
     ts::Server central;
     ts::Process monitor(ts::monitorPath, ts::monitorArguments(central.port()));
     auto registration = central.accept();
-    ASSERT_EQ(ts::receiveFrame(registration), "NAP#1.0#1#0#station-1#spain#51#FIN");
+    ASSERT_EQ(ts::receiveFrame(registration), "NAP#1.0#1#0#station-1#alicante#2D#FIN");
     ts::send(registration, GetParam());
     EXPECT_EQ(ts::receive(registration, 1), "") << "Reserved zero authorized activation";
     const auto code = monitor.waitFor(std::chrono::seconds{3});

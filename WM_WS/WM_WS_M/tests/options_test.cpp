@@ -41,7 +41,7 @@ TEST(MonitorOptions, ParsesOwnedConfigurationAndDefaultsWithoutDns) {
     EXPECT_EQ(options.centralHostname, "central.example");
     EXPECT_EQ(options.centralPort, 9000);
     EXPECT_EQ(options.engineEndpoint.portHostOrder(), 8080);
-    EXPECT_EQ(options.location, "spain");
+    EXPECT_EQ(options.location, "alicante");
     EXPECT_EQ(options.hcpTimeout, std::chrono::milliseconds{2000});
     EXPECT_EQ(options.hcpRetry, std::chrono::milliseconds{1000});
     EXPECT_EQ(options.napInterval, std::chrono::milliseconds{1000});

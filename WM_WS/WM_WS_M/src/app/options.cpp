@@ -32,8 +32,8 @@ std::expected<std::optional<Options>, std::string> parseOptions(int argc, char *
         "Maximum wait for Central to respond, in milliseconds")(
         "central-hostname", po::value<std::string>()->required(), "Central hostname (required)")(
         "central-port", po::value<int>()->required(), "Central port (required)")(
-        "monitor-location", po::value<std::string>()->default_value("spain"),
-        "Location of the station")(
+        "monitor-location", po::value<std::string>()->default_value("alicante"),
+        "City where the station is located")(
         "log-file", po::value<std::string>()->default_value("log/wm-ws-monitor.log"),
         "Save activity logs here; serious errors also appear on screen");
 

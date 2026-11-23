@@ -51,7 +51,7 @@ cmake --build WM_WS/WM_WS_M/build --config Release --parallel 2
   --nap-timeout-ms 2000 \
   --central-hostname altaria.proxy.rlwy.net \
   --central-port 40931 \
-  --monitor-location spain \
+  --monitor-location alicante \
   --log-file log/wm-ws-monitor.log
 ```
 
@@ -105,7 +105,7 @@ docker run -it --name wm-monitor-1 --network wm-network \
   --nap-timeout-ms 2000 \
   --central-hostname altaria.proxy.rlwy.net \
   --central-port 40931 \
-  --monitor-location spain \
+  --monitor-location alicante \
   --log-file /var/log/wm-ws/wm-ws-monitor.log
 ```
 
@@ -139,7 +139,7 @@ docker compose -f WM_WS/compose.yaml -p ws-1 run \
   --nap-timeout-ms 2000 \
   --central-hostname altaria.proxy.rlwy.net \
   --central-port 40931 \
-  --monitor-location spain \
+  --monitor-location alicante \
   --log-file /var/log/wm-ws/wm-ws-monitor.log
 ```
 
