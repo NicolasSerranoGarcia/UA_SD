@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wm-registry"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["Flask>=3.1,<4"]
+
+[project.optional-dependencies]
+deployment = ["gunicorn>=23"]
+
+[project.scripts]
+wm-registry = "wm_registry.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
