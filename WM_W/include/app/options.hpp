@@ -14,6 +14,8 @@ struct Options {
     std::string centralApiUrl;
     std::uint16_t port;
     std::filesystem::path cityFile;
+    std::string openWeatherApiUrl;
+    bool checkConfig;
 };
 
 // An empty optional means --help was printed; an unexpected value is a startup error.

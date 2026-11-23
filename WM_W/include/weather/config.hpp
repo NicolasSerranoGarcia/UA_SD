@@ -9,6 +9,7 @@ namespace weather {
     struct CityCoordinates {
         double latitude;
         double longitude;
+        bool operator==(const CityCoordinates &) const = default;
     };
 
     struct CityConfig {

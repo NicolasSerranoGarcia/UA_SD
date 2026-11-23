@@ -32,6 +32,8 @@ parseOptions(int argc, char *argv[], std::ostream &output) {
         ("check-config", "Validate configuration and exit")
         ("central-api-url", po::value<std::string>(),
          "Central HTTP(S) base URL (environment: CENTRAL_API_URL)")
+        ("openweather-api-url", po::value<std::string>()->default_value("https://api.openweathermap.org"),
+         "OpenWeather base URL (use loopback HTTP for local testing)")
         ("port", po::value<int>()->default_value(WEATHER_PORT),
          "Weather HTTP port (environment: WM_W_PORT)")
         ("config-file", po::value<std::string>()->default_value("config/cities.json"),
@@ -73,8 +75,18 @@ parseOptions(int argc, char *argv[], std::ostream &output) {
     if (port < 1 || port > 65535)
         return std::unexpected("WM_W_PORT must be a whole number from 1 to 65535 (also applies to --port).");
 
+    const auto providerUrl = vm["openweather-api-url"].as<std::string>();
+    const auto provider = boost::urls::parse_uri(providerUrl);
+    if (!provider || provider->encoded_host().empty() || provider->has_userinfo() ||
+        provider->has_query() || provider->has_fragment() ||
+        (provider->has_port() && provider->port_number() == 0) ||
+        (provider->scheme_id() != boost::urls::scheme::https &&
+         !(provider->scheme_id() == boost::urls::scheme::http && provider->encoded_host() == "127.0.0.1")))
+        return std::unexpected("OpenWeather requires an HTTPS base URL or an HTTP URL on 127.0.0.1 for tests.");
+
     return Options{std::string{key}, centralUrl, static_cast<std::uint16_t>(port),
-                   std::filesystem::path{vm["config-file"].as<std::string>()}};
+                   std::filesystem::path{vm["config-file"].as<std::string>()}, providerUrl,
+                   vm.count("check-config") != 0};
 }
 
 } // namespace app
