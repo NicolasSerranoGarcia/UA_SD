@@ -101,7 +101,8 @@ for its topic. One slow station therefore does not occupy the whole server.
 The request handler checks the requested action against the station's state.
 For example, an irrigation request needs an Available station; a BLOCK is refused
 during a leak. Central forwards the accepted command and saves its operation
-code so it can send the response to the right operator.
+code so it can send the response to the right operator. It also refuses a
+request for another station while the same operator is already serving one.
 
 The confirmation handler distinguishes station-initiated irrigation from a
 Central/FO operation. For a commanded operation, it uses the saved command type
@@ -116,7 +117,8 @@ whether the station is watering or blocked. A health `OK` leaves an ongoing
 irrigation or block in place, including when messages from different topics
 arrive out of order. See [S1] and [S2].
 
-Central's dashboard shows each station's ID, location and state. Watering rows
+Central's Flask dashboard opens in a browser and shows each station's ID,
+location and state. Watering rows
 also show the operator, flow in L/min and accumulated litres. Available uses
 green, Watering uses blinking green, Leak uses red, Out of service uses orange,
 and Disconnected uses grey. Central can send irrigation, BLOCK and ACTIVATE to
@@ -147,18 +149,30 @@ steps; a crash can occur between them. The database code is in [S3].
 ## 3.3 The operator's interface
 
 FO lets the operator choose a station, request or stop irrigation, block or
-activate a station, and inspect the station list. Its interface displays
-confirmations, current flow and the final summary. The terminal version uses
-the same requests and responses and can run in a container without a display.
+activate a station, and inspect the station list. We use a browser interface
+served by Flask. The page has action buttons, live flow and estimated volume,
+the last irrigation summary, and a log of confirmations, alerts and errors.
+It refreshes once per second. Each FO instance has its own operator ID and web
+port; it can run in a container while the browser runs on the host.
 
-FO does not connect directly to a station. It sends JSON to Kafka and lets
-Central decide whether the request should proceed. One consumer receives
-`central-notis`; another receives `telemetry`. Notifications go into a queue,
-while telemetry uses a one-item queue that keeps the newest reading rather than
-building up a backlog.
+The browser sends actions to FO's local HTTP API. FO then sends JSON to Kafka
+and lets Central decide whether the request should proceed. It does not connect
+directly to a station. A background worker requests the station list through
+`GET-STATIONS` once per second. The HTTP requests stay between the browser and
+FO; communication with Central still uses Kafka.
 
-FO also accepts a file of requests. Each non-empty line contains a station ID,
-optionally followed by `#` and a duration in seconds:
+Two consumer threads receive `central-notis` and `telemetry`. Command responses
+go into a queue and are matched by operation code. Telemetry updates shared
+state under a lock, which the web API reads for the page. FO estimates volume
+from the one-second flow readings; Engine supplies the final measured total.
+The summary also shows average flow. Restarting FO clears its displayed state,
+including the selected station, log and last summary.
+
+Under **Batches**, the operator can choose a local text file with **Execute
+File** or paste its contents and use **Send Batch**. The browser reads the file
+and sends its contents to FO, so no container volume mount is needed. Each
+non-empty line contains a station ID, optionally followed by `#` and a duration
+in seconds:
 
 ```text
 1#120
@@ -166,14 +180,16 @@ optionally followed by `#` and a duration in seconds:
 1#60
 ```
 
-Here the second request has no duration limit. The file reader converts these
-lines into the same requests used by the interactive controls. Playback is
-sequential: FO waits until the service finishes or fails, then waits four seconds
-before the next request. An indefinite request therefore needs to be stopped
-before playback can continue. FO's request handling and Kafka adapter are in
-[S5] and [S6]; file parsing is in [S7].
+Here the second request has no duration limit. FO sends the same irrigation
+requests as the action buttons, in file order. It waits for each irrigation to
+end, then pauses four seconds before the next request. A rejected request is
+logged and skipped. For timed irrigation, a missing final summary triggers a
+timeout after the requested duration plus 15 seconds. An indefinite request
+needs to be stopped before playback can continue. The web interface and request
+handling are in [S5], the Kafka adapter and shared state in [S6], and file parsing
+in [S7].
 
-![Field operator UI](../screenshots/screenshot-6.png)
+![FO's browser interface, with irrigation controls, batch input, station states, live telemetry and the activity log.](../screenshots/screenshot-6.png)
 
 # 4. Inside a watering station {#station}
 
@@ -357,7 +373,9 @@ started irrigation has no external operation code.
 | `central-notis` | Central | FO | Operator ID |
 
 WS-produced records use `numeric_id % number_of_partitions` for the recipient.
-FO assigns its telemetry and notification consumers with this same modulo rule.
+Central uses `operator_id % number_of_partitions` explicitly when producing
+`central-notis`. FO assigns its telemetry and notification consumers with this
+same modulo rule.
 Different IDs can share a partition, so the consumer must still filter the JSON
 recipient. For instance, operator IDs 1 and 4 share partition 1 when there are
 three partitions, but must not display each other's messages.
@@ -366,6 +384,11 @@ For `central-ops`, Central supplies the station ID as a Kafka key and uses
 librdkafka's default CRC32 partitioning. WS follows that key-based assignment,
 using the canonical decimal station ID, so it reads the partition where Central
 actually writes its commands. Recipient filtering still applies.
+
+The README's sizing example assumes 1,500 operators over three partitions for
+operator messages and 2,000 stations over four command partitions. This gives
+roughly 500 IDs per partition; the running clients use the actual topic counts
+from Kafka.
 
 WS queries Kafka metadata and refreshes its partition counts every five seconds.
 FO also queries its notification/telemetry topic counts when assigning its
@@ -395,8 +418,10 @@ Null or omitted duration means no automatic time limit. Central forwards the
 request only after checking the station, and Engine checks it again locally.
 
 The other operational types are `BLOCK`, `ACTIVATE` and `STOP`; duration is
-ignored for them. For example, this stops the current irrigation without
-putting the station Out of service:
+ignored for them. FO also sends `GET-STATIONS` to refresh its station table;
+that request uses null `station_id` and `duration` fields. It is answered by
+Central without sending a station command. For example, this STOP ends the
+current irrigation without putting the station Out of service:
 
 ```json
 {
@@ -463,7 +488,16 @@ or BLOCK. A late summary must leave the station's fault or block in place.
 
 ## 6.4 Notifications to FO
 
-Central sends responses to the originating operator on `central-notis`:
+Central sends four notification types on `central-notis`:
+
+| Type | Meaning for FO |
+|---|---|
+| `RESPONSE` | Final OK/KO for a command, or the requested station list |
+| `SUMMARY` | Final irrigation duration and litres used |
+| `INFO` | Progress message while Central waits for the station |
+| `ALERT` | A leak, disconnection, or an irrigation stopped or blocked by someone else |
+
+A command response keeps the original operation code:
 
 ```json
 {
@@ -479,7 +513,40 @@ For `GET-STATIONS`, the response also carries a `stations` array of
 `[station_id, location, status]` entries. After irrigation, a `SUMMARY`
 notification carries `summary: [station_id, total_time_minutes, total_litres]`.
 These tuples become JSON arrays; they are not Python-specific objects on the
-wire. Fields that are irrelevant to a notification may be omitted or null.
+wire. Central rounds the summary's duration and litres to two decimal places.
+
+An `INFO` includes a `message` describing progress. For example, Central can
+report that it has forwarded the irrigation request:
+
+```json
+{
+  "operator_id": 7,
+  "type": "INFO",
+  "operation_code": 101,
+  "message": "Irrigation request sent to WS-1; waiting for response"
+}
+```
+
+This does not confirm that watering has started. FO still waits for the
+`RESPONSE` produced after the station's acknowledgement.
+
+An `ALERT` has a `reason` code and a readable `message`. The reason can be
+`DISCONNECTED`, `LEAK`, `BLOCK` or `STOP`. The last two notify the operator
+serving the station when Central or a different FO interrupts the irrigation:
+
+```json
+{
+  "operator_id": 7,
+  "type": "ALERT",
+  "status": "KO",
+  "reason": "BLOCK",
+  "message": "Station WS-1 was blocked by another operator"
+}
+```
+
+FO writes `INFO` and `ALERT` messages to its activity log. They do not replace
+the command response or final summary. Fields that are irrelevant to a
+notification may be omitted or null.
 
 FO filters messages by operator ID before displaying them because several
 operators can share a partition. The topic definitions are in [S19], with the
@@ -495,7 +562,7 @@ message adapters in [S4] and [S6].
 | Monitor stops | Engine stops watering and withholds Kafka publication | Restore supervision and authorisation |
 | Engine stops | Monitor reports failure; Central shows the fault | Restore saved usage and send the interrupted session's final result |
 | Central stops | Existing irrigation can finish; new starts are refused | Reconnect/re-authorise without restarting healthy components |
-| FO stops | The station continues its service | Resume the operator's notifications/results after reconnecting |
+| FO stops | The station continues its service | Restart with the same operator ID and refresh the station list; the displayed session is not saved |
 | Kafka is unavailable | Retain pending station events locally | Retry delivery after the broker returns |
 
 If Engine stops but Monitor is still running, Monitor reports the failure to
@@ -588,7 +655,8 @@ The WS build context is `WM_WS`, not an individual executable folder, because
 both modules need shared headers and CMake support. Compose reads that context
 from its file and prepares image tags for each project. Building both `ws-1`
 and `ws-2` beforehand avoids building missing images during grading. Python
-images use Python 3.12 and install `confluent-kafka`; SQLite comes with Python.
+images use Python 3.12 and install Flask and `confluent-kafka`; SQLite comes
+with Python.
 The C++ builds use CMake, Boost and ninttp, plus librdkafka for Engine. Qt is
 optional for Monitor; the container commands below use its terminal frontend.
 See [S21] and [S22].
@@ -597,7 +665,7 @@ For a self-managed Central container, its equivalent cloud configuration is:
 
 ```sh
 docker volume create wm-central-db
-docker run -d --name wm-central -p 8080:8080 \
+docker run -d --name wm-central -p 8080:8080 -p 8000:8000 \
   -v wm-central-db:/data -e DB_DIR=/data wm-central \
   --server-ip 0.0.0.0 --port 8080 \
   --kafka-ip iriguchi.proxy.rlwy.net --kafka-port 37040
@@ -606,26 +674,30 @@ docker run -d --name wm-central -p 8080:8080 \
 On Railway, the same image/service receives these settings and a persistent
 mount through the service configuration. Its public TCP proxy forwards to the
 internal listening port. Central and SQLite are one application deployment
-with a mounted database; SQLite is not a separate TCP database server.
+with a mounted database; SQLite is not a separate TCP database server. The
+local command also publishes Central's browser dashboard at
+`http://localhost:8000`. Its web port is set by `WEB_PORT`, independently of NAP.
 
 ## 8.2 Starting two field operators on lab PC 1
 
-Use a separate terminal for each operator:
+Use a separate terminal for each operator. These commands use the `wm-fo`
+image built in section 8.1:
 
 ```sh
-docker run --rm -p 8001:8001 wm_fo 1 --web-port 8001 \
+docker run --rm -p 8001:8001 wm-fo 1 --web-port 8001 \
   --kafka-ip iriguchi.proxy.rlwy.net --kafka-port 37040
 ```
 
 ```sh
-docker run --rm -p 8002:8002 wm_fo 2 --web-port 8002 \
+docker run --rm -p 8002:8002 wm-fo 2 --web-port 8002 \
   --kafka-ip iriguchi.proxy.rlwy.net --kafka-port 37040
 ```
 
-These commands start the terminal interface. The GUI uses the same operator
-identity, requests and notifications and requires a graphical display.
-For request files, mount a local request directory into the container and choose
-the path as seen inside that container.
+Open `http://localhost:8001` for operator 1 and `http://localhost:8002` for
+operator 2. The terminals show service logs; the controls are in the browser.
+The default web port is `8000 + operator_id`, and the published container port
+must match `--web-port`. To run a request file, choose it under **Batches** and
+click **Execute File**. The file is read by the browser on the host.
 
 ## 8.3 Starting two watering stations on lab PC 2
 
@@ -686,9 +758,8 @@ remove and recreate the stopped container while retaining the project's volumes.
 A new station uses another project, unique container names and a new `WS_ID`.
 
 The commands use Bash line continuations. In PowerShell, paste each command on
-one line. Run them from the repository root in every terminal. The longer
-build guide also covers native builds, GUI packaging and every executable
-option [S21].
+one line. Run them from the repository root in every terminal. The build guide
+lists native builds, container commands and executable options [S21].
 
 ## 8.4 Native builds and complete executable commands
 
@@ -833,7 +904,7 @@ the operation codes in the confirmations and the final usage:
 | Block before leak | Repair does not clear the earlier block |
 | Monitor crash | Central shows Disconnected; Engine stops and cannot start manually |
 | Engine crash | Monitor reports failure; restart retains committed usage and final result |
-| FO crash | Irrigation continues; original operator obtains its result after recovery |
+| FO crash | Irrigation continues; FO restarts with the same ID and refreshes the station list |
 | Central crash | Current irrigation finishes; new starts wait for Central |
 
 The screenshots show irrigation, healthy monitoring and a leak with the cloud
@@ -842,60 +913,61 @@ captures to explain the run during the practical defence.
 
 ## 9.1 Timed irrigation from FO
 
-We select an Available station in FO and enter a duration in seconds. We check
-that the request is accepted and FO displays the flow readings while the station
-waters. When the time runs out, irrigation should stop automatically and FO
-should display the final duration and litres used.
+We select station 1 in FO's browser page, enter five seconds and click
+**Irrigate**. The log shows the request, confirmation and completion. Once the
+time runs out, the station is Available again and **Last Summary** shows the
+duration, litres used and average flow.
 
-![FO Irrigation](../screenshots/screenshot-7.png)
+![FO after a five-second irrigation at station 1. The final summary reports 3.3 L, and the log records the start and finish.](../screenshots/screenshot-7.png)
 
 ## 9.2 Blocking a station from FO
 
-We send BLOCK to an Available station from FO and check the confirmation. The
-station should appear as Out of service, and a new irrigation request should be
-rejected. We then use ACTIVATE to make it available again.
+We select an Available station, click **Block** and check the confirmation in
+FO's log. The station table should show Out of service, and a new irrigation
+request should be rejected. We then click **Activate** to make it available
+again.
 
-![FO Block](../screenshots/screenshot-8.png)
+![FO's station table and log after a block request.](../screenshots/screenshot-8.png)
 
 ## 9.3 Reading requests from a file
 
-We load a text file into FO with one request per line, using `station_id#seconds`
-for timed irrigation. We check that FO sends the requests in order, waits for
-each irrigation to finish and pauses four seconds before the next one. The log
-lets us compare the requests with the file.
+Under **Batches**, we choose a text file with one `station_id#seconds` request
+per line and click **Execute File**. We check that FO sends the requests in
+order, waits for each irrigation to finish and pauses four seconds before the
+next one. The batch entries in the log let us compare the run with the file.
 
-![FO File reading](../screenshots/screenshot-9.png)
+![FO's file input and batch log, including completed requests and rejected irrigation attempts.](../screenshots/screenshot-9.png)
 
 # 10. Source references {#sources}
 
-The project links below refer to repository snapshot `9550791`. Each entry
+The project links below refer to repository snapshot `03aec17`. Each entry
 names the files and functions discussed in the report. The ninttp link uses
 the revision selected by our CMake configuration.
 
 | Ref. | Source and reading focus |
 |---|---|
-| [S1] | [WM_Central.py](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_Central/WM_Central.py): `manage_WS`, `fo_req_handler`, confirmation/summary handlers and `main`. |
-| [S2] | [Central NAPManager.py](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_Central/modules/NAPManager.py): framing, LRC, registration, activation and persistent health handling. |
-| [S3] | [DBManager.py](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_Central/modules/DBManager.py): schema, WAL, write queue and reads. |
-| [S4] | [Central kafka_clients.py](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_Central/modules/kafka_clients.py): producer, consumer workers and JSON dispatch. |
-| [S5] | [WM_FO.py](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_FO/WM_FO.py): request correlation, irrigation display and result handling. |
-| [S6] | [FO kafka_clients.py](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_FO/modules/kafka_clients.py): requests, topic metadata, recipient filtering and queues. |
-| [S7] | [FO utils.py](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_FO/modules/utils.py): request-file parsing and terminal helpers. |
-| [S8] | [Engine app.cpp](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_WS/WM_WS_E/src/app/app.cpp): Engine, Kafka, console and health-server lifetime. |
-| [S9] | [Monitor app.cpp](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_WS/WM_WS_M/src/app/app.cpp): HCP session, health polling and recovery authorisation. |
-| [S10] | [Station implementation](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_WS/WM_WS_E/src/kafka/station.cpp): command validation, deduplication, sessions, summaries and checkpoint recovery. |
-| [S11] | [Engine implementation](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_WS/WM_WS_E/src/engine/engine.cpp): guarded state transitions, fault handling, deadlines and meter snapshots. |
-| [S12] | [Flow meter](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_WS/WM_WS_E/include/engine/flow_meter/flow_meter.hpp): pressure variation and integrated litres. |
-| [S13] | [Reporter](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_WS/WM_WS_M/src/nap/reporter.cpp) and [Connection](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_WS/WM_WS_M/include/nap/connection.hpp): asynchronous reporting and validated NAP exchanges. |
-| [S14] | [Qt window](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_WS/WM_WS_M/src/gui/window.cpp) and [GUI guide](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_WS/WM_WS_M/docs/gui.md): status, activity log and graceful close. |
-| [S15] | [NAP specification](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/shared/NAP-protocol-spec.md): shared frame and error-code definitions. |
-| [S16] | [HCP specification](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_WS/shared/HCP-protocol-spec.md): ID, HC, AC, DC and deadlines. |
-| [S17] | [Health server](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_WS/WM_WS_E/src/app/health_server.cpp) and [HCP helpers](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_WS/shared/hcp.hpp): exact frames and failed-session cleanup. |
-| [S18] | [Kafka Service](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_WS/WM_WS_E/src/kafka/service.cpp): worker, metadata routing, durable send and broker callbacks. |
-| [S19] | [Repository README](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/Readme.md): Kafka topics and agreed JSON fields. |
-| [S20] | [Journal](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_WS/WM_WS_E/src/kafka/journal.cpp): alternating snapshots, validation and file synchronisation. |
-| [S21] | [BUILDING.md](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_WS/BUILDING.md), [Compose](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_WS/compose.yaml) and [acceptance matrix](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_WS/ACCEPTANCE.md): reproduction and evidence. |
-| [S22] | [Central Dockerfile](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_Central/Dockerfile), [FO Dockerfile](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_FO/Dockerfile), [Engine Dockerfile](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_WS/WM_WS_E/Dockerfile) and [Monitor Dockerfile](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_WS/WM_WS_M/Dockerfile): image build and startup. |
-| [S23] | [Kafka codec](https://github.com/NicolasSerranoGarcia/UA_SD/blob/9550791993cff6274daa1ac676fc4b9aad4d921f/WM_WS/WM_WS_E/src/kafka/protocol.cpp): lossless UUID parsing, operation keys and numeric wire serialization. |
+| [S1] | [WM_Central.py](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_Central/WM_Central.py) and [Central web API](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_Central/modules/web/web_api.py): NAP workers, Kafka handlers and browser controls. |
+| [S2] | [Central NAPManager.py](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_Central/modules/utils/NAPManager.py): framing, LRC, registration, activation and persistent health handling. |
+| [S3] | [DBManager.py](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_Central/modules/utils/DBManager.py): schema, WAL, write queue and reads. |
+| [S4] | [Central kafka_clients.py](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_Central/modules/kafka_clients.py): producer, consumer workers and JSON dispatch. |
+| [S5] | [WM_FO.py](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_FO/WM_FO.py), [FO web API](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_FO/modules/web/web_api.py) and [browser page](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_FO/modules/web/static/index.html): startup, command responses, station polling and batch playback. |
+| [S6] | [FO kafka_clients.py](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_FO/modules/kafka_clients.py) and [shared_status.py](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_FO/modules/shared/shared_status.py): partition assignment, recipient filtering, display state and summaries. |
+| [S7] | [FO utils.py](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_FO/modules/utils.py): request-file parsing and duration formatting. |
+| [S8] | [Engine app.cpp](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_WS/WM_WS_E/src/app/app.cpp): Engine, Kafka, console and health-server lifetime. |
+| [S9] | [Monitor app.cpp](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_WS/WM_WS_M/src/app/app.cpp): HCP session, health polling and recovery authorisation. |
+| [S10] | [Station implementation](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_WS/WM_WS_E/src/kafka/station.cpp): command validation, deduplication, sessions, summaries and checkpoint recovery. |
+| [S11] | [Engine implementation](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_WS/WM_WS_E/src/engine/engine.cpp): guarded state transitions, fault handling, deadlines and meter snapshots. |
+| [S12] | [Flow meter](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_WS/WM_WS_E/include/engine/flow_meter/flow_meter.hpp): pressure variation and integrated litres. |
+| [S13] | [Reporter](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_WS/WM_WS_M/src/nap/reporter.cpp) and [Connection](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_WS/WM_WS_M/include/nap/connection.hpp): asynchronous reporting and validated NAP exchanges. |
+| [S14] | [Qt window](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_WS/WM_WS_M/src/gui/window.cpp) and [GUI guide](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_WS/WM_WS_M/docs/gui.md): status, activity log and graceful close. |
+| [S15] | [NAP specification](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/shared/NAP-protocol-spec.md): shared frame and error-code definitions. |
+| [S16] | [HCP specification](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_WS/shared/HCP-protocol-spec.md): ID, HC, AC, DC and deadlines. |
+| [S17] | [Health server](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_WS/WM_WS_E/src/app/health_server.cpp) and [HCP helpers](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_WS/shared/hcp.hpp): exact frames and failed-session cleanup. |
+| [S18] | [Kafka Service](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_WS/WM_WS_E/src/kafka/service.cpp): worker, metadata routing, durable send and broker callbacks. |
+| [S19] | [Repository README](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/Readme.md): Kafka topics, notification fields and partition sizing. |
+| [S20] | [Journal](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_WS/WM_WS_E/src/kafka/journal.cpp): alternating snapshots, validation and file synchronisation. |
+| [S21] | [WS build commands](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_WS/BUILDING.md), [Compose](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_WS/compose.yaml) and [FO setup](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_FO/BUILDING.md): native builds and container deployment. |
+| [S22] | [Central Dockerfile](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_Central/Dockerfile), [FO Dockerfile](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_FO/Dockerfile), [Engine Dockerfile](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_WS/WM_WS_E/Dockerfile) and [Monitor Dockerfile](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_WS/WM_WS_M/Dockerfile): image build and startup. |
+| [S23] | [Kafka codec](https://github.com/NicolasSerranoGarcia/UA_SD/blob/03aec178d1e602b6b48bc61d321a8f6a2da7d848/WM_WS/WM_WS_E/src/kafka/protocol.cpp): lossless UUID parsing, operation keys and numeric wire serialization. |
 | [S24] | [ninttp](https://github.com/NicolasSerranoGarcia/ninttp/tree/61e798539367f640f304825012b9c45066532d90): the socket and DNS library used by Engine and Monitor, including its platform flags. |
 | [S25] | [GCC library headers](https://gcc.gnu.org/onlinedocs/libstdc++/manual/using_headers.html) and [Microsoft's Winsock porting guide](https://learn.microsoft.com/en-us/windows/win32/winsock/porting-socket-applications-to-winsock): networking extensions outside the C++23 standard library and differences between Windows and Unix sockets. |
