@@ -111,11 +111,13 @@ docker run -it --name wm-monitor-1 --network wm-network \
 
 ## 3. Build and run with Compose
 
+After quitting a module, rerun the same command in its terminal. The `--rm` flag removes the container when it exits. Keep the same project name (`-p ws-1`) for both commands so they share a network and reuse the station's log and state volumes.
+
 ### Engine — terminal 1
 
 ```sh
 docker compose -f WM_WS/compose.yaml -p ws-1 run \
-  --build --remove-orphans --no-deps --use-aliases --name wm-engine-1 \
+  --rm --build --no-deps --use-aliases \
   engine ./build/WM_WS_E \
   --queue iriguchi.proxy.rlwy.net:37040 \
   --hcp-port 8080 \
@@ -128,7 +130,7 @@ docker compose -f WM_WS/compose.yaml -p ws-1 run \
 
 ```sh
 docker compose -f WM_WS/compose.yaml -p ws-1 run \
-  --build --remove-orphans --no-deps --use-aliases --name wm-monitor-1 \
+  --rm --build --no-deps \
   monitor ./build/WM_WS_M \
   --ws-id 1 \
   --engine-hostname engine \
@@ -145,26 +147,26 @@ docker compose -f WM_WS/compose.yaml -p ws-1 run \
 
 ## Restart and cleanup
 
-### Restart Engine — terminal 1
+### Restart Engine created with `docker run` — terminal 1
 
 ```sh
 docker start -ai wm-engine-1
 ```
 
-### Restart Monitor — terminal 2
+### Restart Monitor created with `docker run` — terminal 2
 
 ```sh
 docker start -ai wm-monitor-1
 ```
 
-### Stop and delete station 1 containers
+### Stop and delete `docker run` containers for station 1
 
 ```sh
 docker stop wm-monitor-1 wm-engine-1
 docker rm wm-monitor-1 wm-engine-1
 ```
 
-### Stop and delete station 2 containers
+### Stop and delete `docker run` containers for station 2
 
 ```sh
 docker stop wm-monitor-2 wm-engine-2
